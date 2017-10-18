@@ -1466,9 +1466,7 @@ void config_setdefaultsettings(aConfiguration *i)
 	i->ident_read_timeout = 30;
 	i->ident_connect_timeout = 3;
 	i->nick_count = 3; i->nick_period = 60; /* nickflood protection: max 3 per 60s */
-#ifdef NO_FLOOD_AWAY
 	i->away_count = 4; i->away_period = 120; /* awayflood protection: max 4 per 120s */
-#endif
 	i->throttle_count = 3; i->throttle_period = 60; /* throttle protection: max 3 per 60s */
 	i->modef_default_unsettime = 0;
 	i->modef_max_unsettime = 60; /* 1 hour seems enough :p */
@@ -1501,6 +1499,9 @@ void config_setdefaultsettings(aConfiguration *i)
 	if (!ipv6_capable())
 		DISABLE_IPV6 = 1;
 	i->network.x_prefix_quit = strdup("Quit");
+	i->max_unknown_connections_per_ip = 3;
+	i->handshake_timeout = 30;
+	i->handshake_delay = -1;
 
 	/* SSL/TLS options */
 	i->ssl_options = MyMallocEx(sizeof(SSLOptions));
@@ -1524,6 +1525,9 @@ void config_setdefaultsettings(aConfiguration *i)
  */
 void postconf_defaults(void)
 {
+	Isupport *is;
+	char tmpbuf[512];
+
 	if (!iConf.plaintext_policy_user_message)
 	{
 		/* The message depends on whether it's reject or warn.. */
@@ -1540,6 +1544,13 @@ void postconf_defaults(void)
 			safestrdup(iConf.plaintext_policy_oper_message, "You need to use a secure connection (SSL/TLS) in order to /OPER.");
 		else if (iConf.plaintext_policy_oper == PLAINTEXT_POLICY_WARN)
 			safestrdup(iConf.plaintext_policy_oper_message, "WARNING: You /OPER'ed up from an insecure connection. Please consider using SSL/TLS.");
+	}
+
+	is = IsupportFind("MAXLIST");
+	if (is)
+	{
+		ircsnprintf(tmpbuf, sizeof(tmpbuf), "b:%d,e:%d,I:%d", MAXBANS, MAXBANS, MAXBANS);
+		IsupportSetValue(is, tmpbuf);
 	}
 }
 
@@ -6802,10 +6813,10 @@ int	_test_link(ConfigFile *conf, ConfigEntry *ce)
 				anAuthStruct *auth = Auth_ConvertConf2AuthStruct(cep);
 				/* hm. would be nicer if handled @auth-system I think. ah well.. */
 				if ((auth->type != AUTHTYPE_PLAINTEXT) && (auth->type != AUTHTYPE_SSL_CLIENTCERT) &&
-				    (auth->type != AUTHTYPE_SSL_CLIENTCERTFP))
+				    (auth->type != AUTHTYPE_SSL_CLIENTCERTFP) && (auth->type != AUTHTYPE_SPKIFP))
 				{
 					config_error("%s:%i: password in link block should be plaintext OR should be the "
-					             "SSL fingerprint of the remote link (=better)",
+					             "SSL or SPKI fingerprint of the remote link (=better)",
 					             /* TODO: mention some faq or wiki item for more information */
 					             cep->ce_fileptr->cf_filename, cep->ce_varlinenum);
 					errors++;
@@ -7648,7 +7659,6 @@ int	_conf_set(ConfigFile *conf, ConfigEntry *ce)
 					tempiConf.unknown_flood_bantime = config_checkval(cepp->ce_vardata,CFG_TIME);
 				else if (!strcmp(cepp->ce_varname, "unknown-flood-amount"))
 					tempiConf.unknown_flood_amount = atol(cepp->ce_vardata);
-#ifdef NO_FLOOD_AWAY
 				else if (!strcmp(cepp->ce_varname, "away-count"))
 					tempiConf.away_count = atol(cepp->ce_vardata);
 				else if (!strcmp(cepp->ce_varname, "away-period"))
@@ -7660,7 +7670,6 @@ int	_conf_set(ConfigFile *conf, ConfigEntry *ce)
 					tempiConf.away_count = cnt;
 					tempiConf.away_period = period;
 				}
-#endif
 				else if (!strcmp(cepp->ce_varname, "nick-flood"))
 				{
 					int cnt, period;
@@ -7859,6 +7868,22 @@ int	_conf_set(ConfigFile *conf, ConfigEntry *ce)
 					/* if we would expand this later then change this to a bitmask or struct or whatever */
 				}
 			}
+		}
+		else if (!strcmp(cep->ce_varname, "max-unknown-connections-per-ip"))
+		{
+			tempiConf.max_unknown_connections_per_ip = atoi(cep->ce_vardata);
+		}
+		else if (!strcmp(cep->ce_varname, "handshake-timeout"))
+		{
+			tempiConf.handshake_timeout = config_checkval(cep->ce_vardata, CFG_TIME);
+		}
+		else if (!strcmp(cep->ce_varname, "handshake-delay"))
+		{
+			tempiConf.handshake_delay = config_checkval(cep->ce_vardata, CFG_TIME);
+		}
+		else if (!strcmp(cep->ce_varname, "ban-include-username"))
+		{
+			tempiConf.ban_include_username = config_checkval(cep->ce_vardata, CFG_YESNO);
 		}
 		else
 		{
@@ -8304,7 +8329,6 @@ int	_test_set(ConfigFile *conf, ConfigEntry *ce)
 				else if (!strcmp(cepp->ce_varname, "unknown-flood-amount")) {
 					CheckDuplicate(cepp, anti_flood_unknown_flood_amount, "anti-flood::unknown-flood-amount");
 				}
-#ifdef NO_FLOOD_AWAY
 				else if (!strcmp(cepp->ce_varname, "away-count")) {
 					int temp = atol(cepp->ce_vardata);
 					CheckDuplicate(cepp, anti_flood_away_count, "anti-flood::away-count");
@@ -8351,7 +8375,6 @@ int	_test_set(ConfigFile *conf, ConfigEntry *ce)
 						errors++;
 					}
 				}
-#endif
 				else if (!strcmp(cepp->ce_varname, "nick-flood"))
 				{
 					int cnt, period;
@@ -8764,6 +8787,44 @@ int	_test_set(ConfigFile *conf, ConfigEntry *ce)
 					continue;
 				}
 			}
+		}
+		else if (!strcmp(cep->ce_varname, "max-unknown-connections-per-ip")) {
+			int v;
+			CheckNull(cep);
+			v = atoi(cep->ce_vardata);
+			if (v < 1)
+			{
+				config_error("%s:%i: set::max-unknown-connections-per-ip: value should be at least 1.",
+					cep->ce_fileptr->cf_filename, cep->ce_varlinenum);
+				errors++;
+			}
+		}
+		else if (!strcmp(cep->ce_varname, "handshake-timeout")) {
+			int v;
+			CheckNull(cep);
+			v = config_checkval(cep->ce_vardata, CFG_TIME);
+			if (v < 5)
+			{
+				config_error("%s:%i: set::handshake-timeout: value should be at least 5 seconds.",
+					cep->ce_fileptr->cf_filename, cep->ce_varlinenum);
+				errors++;
+			}
+		}
+		else if (!strcmp(cep->ce_varname, "handshake-delay"))
+		{
+			int v;
+			CheckNull(cep);
+			v = config_checkval(cep->ce_vardata, CFG_TIME);
+			if (v >= 10)
+			{
+				config_error("%s:%i: set::handshake-delay: value should be less than 10 seconds.",
+					cep->ce_fileptr->cf_filename, cep->ce_varlinenum);
+				errors++;
+			}
+		}
+		else if (!strcmp(cep->ce_varname, "ban-include-username"))
+		{
+			CheckNull(cep);
 		}
 		else
 		{

@@ -469,11 +469,7 @@ static char *replies[] = {
 /* 426 */ NULL,
 /* 427 */ NULL,
 /* 428 */ NULL,
-#ifdef NO_FLOOD_AWAY
 /* 429 ERR_TOOMANYAWAY */ ":%s 429 %s :Too Many aways - Flood Protection activated",
-#else
-/* 429 */ NULL,
-#endif
 /* 430 */ NULL, /* austhex */
 /* 431    ERR_NONICKNAMEGIVEN */ ":%s 431 %s :No nickname given",
 /* 432    ERR_ERRONEUSNICKNAME */ ":%s 432 %s %s :Nickname is unavailable: %s",
@@ -499,15 +495,11 @@ static char *replies[] = {
 /* 452 */ NULL, /* Used */
 /* 453 */ NULL, /* Used */
 /* 454 */ NULL,
-#ifdef HOSTILENAME
 /* 455    ERR_HOSTILENAME */ ":%s 455 %s :Your username %s contained the invalid "
 	    "character(s) %s and has been changed to %s. "
 	    "Please use only the characters 0-9 a-z A-Z _ - "
 	    "or . in your username. Your username is the part "
 	    "before the @ in your email address.",
-#else
-/* 455 */ NULL, 
-#endif
 /* 456 */ NULL, /* hybrid */
 /* 457 */ NULL, /* hybrid */
 /* 458 */ NULL, /* hybrid */

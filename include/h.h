@@ -46,7 +46,7 @@ extern MODVAR time_t timeofday;
 /* newconf */
 #define get_sendq(x) ((x)->local->class ? (x)->local->class->sendq : MAXSENDQLENGTH)
 /* get_recvq is only called in send.c for local connections */
-#define get_recvq(x) ((x)->local->class->recvq ? (x)->local->class->recvq : CLIENT_FLOOD)
+#define get_recvq(x) ((x)->local->class->recvq ? (x)->local->class->recvq : DEFAULT_RECVQ)
 
 #define CMD_FUNC(x) int __attribute__((warn_unused_result)) (x) (aClient *cptr, aClient *sptr, int parc, char *parv[])
 
@@ -515,8 +515,6 @@ extern u_char getrandom8();
 extern u_int16_t getrandom16();
 extern u_int32_t getrandom32();
 #define EVENT_DRUGS BASE_VERSION
-extern void rejoin_leave(aClient *sptr);
-extern void rejoin_joinandmode(aClient *sptr);
 extern void ident_failed(aClient *cptr);
 
 extern MODVAR char extchmstr[4][64];
@@ -669,6 +667,9 @@ extern MODVAR int (*check_banned)(aClient *cptr);
 extern MODVAR void (*introduce_user)(aClient *to, aClient *acptr);
 extern MODVAR int (*check_deny_version)(aClient *cptr, char *version_string, int protocol, char *flags);
 extern MODVAR int (*match_user)(char *rmask, aClient *acptr, int options);
+extern MODVAR void (*userhost_save_current)(aClient *sptr);
+extern MODVAR void (*userhost_changed)(aClient *sptr);
+extern MODVAR void (*send_join_to_local_users)(aClient *sptr, aChannel *chptr);
 /* /Efuncs */
 
 extern MODVAR aMotdFile opermotd, svsmotd, motd, botmotd, smotd, rules;
@@ -798,3 +799,6 @@ extern int cipher_check(SSL_CTX *ctx, char **errstr);
 extern void clicap_pre_rehash(void);
 extern void clicap_post_rehash(void);
 extern void send_cap_notify(int add, char *token);
+extern void sendbufto_one(aClient *to, char *msg, unsigned int quick);
+extern MODVAR int current_serial;
+extern char *spki_fingerprint(aClient *acptr);

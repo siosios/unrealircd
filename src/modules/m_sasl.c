@@ -22,15 +22,6 @@
 
 #include "unrealircd.h"
 
-#define MSG_AUTHENTICATE "AUTHENTICATE"
-
-#define MSG_SASL "SASL"
-
-#define MSG_SVSLOGIN "SVSLOGIN"
-
-/* returns a server identifier given agent_p */
-#define AGENT_SID(agent_p)	(agent_p->user != NULL ? agent_p->user->server : agent_p->name)
-
 ModuleHeader MOD_HEADER(m_sasl)
   = {
 	"m_sasl",
@@ -39,6 +30,19 @@ ModuleHeader MOD_HEADER(m_sasl)
 	"3.2-b8-1",
 	NULL 
     };
+
+/* Forward declarations */
+void saslmechlist_free(ModData *m);
+char *saslmechlist_serialize(ModData *m);
+void saslmechlist_unserialize(char *str, ModData *m);
+char *sasl_capability_parameter(aClient *acptr);
+int sasl_server_synched(aClient *sptr);
+
+/* Macros */
+#define MSG_AUTHENTICATE "AUTHENTICATE"
+#define MSG_SASL "SASL"
+#define MSG_SVSLOGIN "SVSLOGIN"
+#define AGENT_SID(agent_p)	(agent_p->user != NULL ? agent_p->user->server : agent_p->name)
 
 /*
  * This is a "lightweight" SASL implementation/stack which uses psuedo-identifiers
@@ -329,10 +333,39 @@ int sasl_server_quit(aClient *sptr)
 	return 0;
 }
 
-int sasl_server_connect(aClient *sptr)
+void auto_discover_sasl_server(int justlinked)
+{
+	if (!SASL_SERVER && SERVICES_NAME)
+	{
+		aClient *acptr = find_server(SERVICES_NAME, NULL);
+		if (acptr && moddata_client_get(acptr, "saslmechlist"))
+		{
+			/* SASL server found */
+			if (justlinked)
+			{
+				/* Let's send this message only on link and not also on /rehash */
+				sendto_realops("Services server '%s' provides SASL authentication, good! "
+				               "I'm setting set::sasl-server to '%s' internally.",
+				               SERVICES_NAME, SERVICES_NAME);
+				/* We should really get some LOG_INFO or something... I keep abusing LOG_ERROR :) */
+				ircd_log(LOG_ERROR, "Services server '%s' provides SASL authentication, good! "
+				                    "I'm setting set::sasl-server to '%s' internally.",
+				                    SERVICES_NAME, SERVICES_NAME);
+			}
+			safestrdup(SASL_SERVER, SERVICES_NAME);
+			if (justlinked)
+				sasl_server_synched(acptr);
+		}
+	}
+}
+
+int sasl_server_synched(aClient *sptr)
 {
 	if (!SASL_SERVER)
+	{
+		auto_discover_sasl_server(1);
 		return 0;
+	}
 
 	/* If the set::sasl-server is gone, let everyone know 'sasl' is no longer available */
 	if (!strcasecmp(sptr->name, SASL_SERVER))
@@ -344,7 +377,8 @@ int sasl_server_connect(aClient *sptr)
 MOD_INIT(m_sasl)
 {
 	ClientCapability cap;
-	
+	ModDataInfo mreq;
+
 	MARK_AS_OFFICIAL_MODULE(modinfo);
 
 	CommandAdd(modinfo->handle, MSG_SASL, m_sasl, MAXPARA, M_USER|M_SERVER);
@@ -354,23 +388,68 @@ MOD_INIT(m_sasl)
 	HookAdd(modinfo->handle, HOOKTYPE_LOCAL_CONNECT, 0, sasl_connect);
 	HookAdd(modinfo->handle, HOOKTYPE_LOCAL_QUIT, 0, sasl_quit);
 	HookAdd(modinfo->handle, HOOKTYPE_SERVER_QUIT, 0, sasl_server_quit);
-	HookAdd(modinfo->handle, HOOKTYPE_POST_SERVER_CONNECT, 0, sasl_server_connect);
+	HookAdd(modinfo->handle, HOOKTYPE_SERVER_SYNCHED, 0, sasl_server_synched);
 
 	memset(&cap, 0, sizeof(cap));
 	cap.name = "sasl";
 	cap.cap = PROTO_SASL;
 	cap.visible = sasl_capability_visible;
+	cap.parameter = sasl_capability_parameter;
 	ClientCapabilityAdd(modinfo->handle, &cap);
+
+	memset(&mreq, 0, sizeof(mreq));
+	mreq.name = "saslmechlist";
+	mreq.free = saslmechlist_free;
+	mreq.serialize = saslmechlist_serialize;
+	mreq.unserialize = saslmechlist_unserialize;
+	mreq.sync = 1;
+	mreq.type = MODDATATYPE_CLIENT;
+	ModDataAdd(modinfo->handle, mreq);
 
 	return MOD_SUCCESS;
 }
 
 MOD_LOAD(m_sasl)
 {
+	auto_discover_sasl_server(0);
 	return MOD_SUCCESS;
 }
 
 MOD_UNLOAD(m_sasl)
 {
 	return MOD_SUCCESS;
+}
+
+void saslmechlist_free(ModData *m)
+{
+	if (m->str)
+		MyFree(m->str);
+}
+
+char *saslmechlist_serialize(ModData *m)
+{
+	if (!m->str)
+		return NULL;
+	return m->str;
+}
+
+void saslmechlist_unserialize(char *str, ModData *m)
+{
+	if (m->str)
+		MyFree(m->str);
+	m->str = strdup(str);
+}
+
+char *sasl_capability_parameter(aClient *acptr)
+{
+	aClient *server;
+
+	if (SASL_SERVER)
+	{
+		server = find_server(SASL_SERVER, NULL);
+		if (server)
+			return moddata_client_get(server, "saslmechlist"); /* NOTE: could still return NULL */
+	}
+
+	return NULL;
 }

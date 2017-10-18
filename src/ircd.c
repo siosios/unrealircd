@@ -542,7 +542,7 @@ EVENT(check_unknowns)
 
 	list_for_each_entry_safe(cptr, cptr2, &unknown_list, lclient_node)
 	{
-		if (cptr->local->firsttime && ((TStime() - cptr->local->firsttime) > CONNECTTIMEOUT))
+		if (cptr->local->firsttime && ((TStime() - cptr->local->firsttime) > iConf.handshake_timeout))
 		{
 			(void)exit_client(cptr, cptr, &me, "Registration Timeout");
 			continue;
@@ -558,7 +558,7 @@ int check_ping(aClient *cptr)
 	char scratch[64];
 	int ping = 0;
 
-	ping = cptr->local->class ? cptr->local->class->pingfreq : CONNECTTIMEOUT;
+	ping = cptr->local->class ? cptr->local->class->pingfreq : iConf.handshake_timeout;
 	Debug((DEBUG_DEBUG, "c(%s)=%d p %d a %d", cptr->name,
 		cptr->status, ping,
 		TStime() - cptr->local->lasttime));
@@ -1104,14 +1104,10 @@ int InitUnrealIRCd(int argc, char *argv[])
 			  break;
 #ifndef _WIN32
 		  case 'f':
-#ifndef CMDLINE_CONFIG
 		      if ((uid == euid) && (gid == egid))
 			       configfile = strdup(p);
 			  else
 			       printf("ERROR: Command line config with a setuid/setgid ircd is not allowed");
-#else
-			  configfile = strdup(p);
-#endif
 			  convert_to_absolute_path(&configfile, CONFDIR);
 			  break;
 		  case 'h':
@@ -1323,7 +1319,7 @@ int InitUnrealIRCd(int argc, char *argv[])
 	default_class =
 	    (ConfigItem_class *) MyMallocEx(sizeof(ConfigItem_class));
 	default_class->flag.permanent = 1;
-	default_class->pingfreq = PINGFREQUENCY;
+	default_class->pingfreq = 120;
 	default_class->maxclients = 100;
 	default_class->sendq = MAXSENDQLENGTH;
 	default_class->name = "default";

@@ -324,7 +324,7 @@ typedef OperPermission (*OperClassEntryEvalCallback)(OperClassACLEntryVar* varia
  * -DuffJ
  */
 
-#define SNO_DEFOPER "+kscfvGqob"
+#define SNO_DEFOPER "+kscfvGqobS"
 #define SNO_DEFUSER "+ks"
 
 #define SEND_UMODES (SendUmodes)
@@ -357,6 +357,8 @@ typedef OperPermission (*OperClassEntryEvalCallback)(OperClassACLEntryVar* varia
 #define PROTO_ACCOUNT_NOTIFY	0x200000	/* client supports account-notify */
 #define PROTO_MLOCK		0x400000	/* server supports MLOCK */
 #define PROTO_EXTSWHOIS 0x800000	/* extended SWHOIS support */
+#define PROTO_CAP_CHGHOST	0x1000000	/* CAP chghost */
+#define PROTO_CAP_EXTENDED_JOIN	0x2000000	/* CAP extended-join */
 
 /*
  * flags macros.
@@ -671,10 +673,8 @@ struct User {
 	struct {
 		time_t nick_t;
 		unsigned char nick_c;
-#ifdef NO_FLOOD_AWAY
 		time_t away_t;			/* last time the user set away */
 		unsigned char away_c;	/* number of times away has been set */
-#endif
 	} flood;
 	TS lastaway;
 };

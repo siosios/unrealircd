@@ -793,6 +793,7 @@ extern char *moddata_client_get(aClient *acptr, char *varname);
 #define HOOKTYPE_SEE_CHANNEL_IN_WHOIS 86
 #define HOOKTYPE_DCC_DENIED 87
 #define HOOKTYPE_SERVER_HANDSHAKE_OUT 88
+#define HOOKTYPE_SERVER_SYNCHED	89
 /* Adding a new hook here?
  * 1) Add the #define HOOKTYPE_.... with a new number
  * 2) Add a hook prototypy (see below)
@@ -887,6 +888,7 @@ int hooktype_pre_kill(aClient *sptr, aClient *victim, char *killpath);
 int hooktype_see_channel_in_whois(aClient *sptr, aClient *target, aChannel *chptr);
 int hooktype_dcc_denied(aClient *sptr, aClient *target, char *realfile, char *displayfile, ConfigItem_deny_dcc *denydcc);
 int hooktype_server_handshake_out(aClient *sptr);
+int hooktype_server_synched(aClient *sptr);
 
 #ifdef GCC_TYPECHECKING
 #define ValidateHook(validatefunc, func) __builtin_types_compatible_p(__typeof__(func), __typeof__(validatefunc))
@@ -979,7 +981,8 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
         ((hooktype == HOOKTYPE_PRE_KILL) && !ValidateHook(hooktype_pre_kill, func)) || \
         ((hooktype == HOOKTYPE_SEE_CHANNEL_IN_WHOIS) && !ValidateHook(hooktype_see_channel_in_whois, func)) || \
         ((hooktype == HOOKTYPE_DCC_DENIED) && !ValidateHook(hooktype_dcc_denied, func)) || \
-        ((hooktype == HOOKTYPE_SERVER_HANDSHAKE_OUT) && !ValidateHook(hooktype_server_handshake_out, func)) ) \
+        ((hooktype == HOOKTYPE_SERVER_HANDSHAKE_OUT) && !ValidateHook(hooktype_server_handshake_out, func)) || \
+        ((hooktype == HOOKTYPE_SERVER_SYNCHED) && !ValidateHook(hooktype_server_synched, func)) ) \
         _hook_error_incompatible();
 #endif /* GCC_TYPECHECKING */
 
@@ -1044,6 +1047,9 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
 #define EFUNC_SEND_MODDATA_MEMBERS	51
 #define EFUNC_BROADCAST_MODDATA_CLIENT	52
 #define EFUNC_MATCH_USER			53
+#define EFUNC_USERHOST_SAVE_CURRENT	54
+#define EFUNC_USERHOST_CHANGED		55
+#define EFUNC_SEND_JOIN_TO_LOCAL_USERS		56
 
 /* Module flags */
 #define MODFLAG_NONE	0x0000

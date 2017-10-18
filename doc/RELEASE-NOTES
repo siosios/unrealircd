@@ -1,74 +1,106 @@
-UnrealIRCd 4.0.14 Release Notes
+UnrealIRCd 4.0.16-devel Release Notes
 ================================
 
-==[ CHANGES BETWEEN 4.0.13 AND 4.0.14 ]==
+==[ CHANGES BETWEEN 4.0.15 AND 4.0.16 ]==
+
+UnrealIRCd 4.0.16 is not released yet. It is in development.
+These release notes are thus work-in-progress.
+
 Enhancements:
-* New set::plaintext-policy configuration settings. This defines what
-  happens to users/ircops/servers that are not using SSL/TLS.
-  The default settings are:
-  set {
-    plaintext-policy {
-      user allow; /* allow any user to connect */
-      oper warn; /* warn on /OPER if not using SSL/TLS */
-      server deny; /* deny servers without SSL/TLS, except localhost */
-    };
+* There's now an easy method to remove spamfilters:
+  '/SPAMFILTER del' will show a list of spamfilters along
+  with the appropriate command to remove them (by id).
+* CAP v3.2 support.
+* CAP 'cap-notify': notify users of any CAP changes.
+* CAP 'extended-join': show account and gecos in JOIN.
+* CAP 'chghost': notify on user/host changes.
+  Note that if you use set::allow-userhost-change force-rejoin
+  then clients which support CAP 'chghost' will not see the
+  PART+JOIN+MODE sequence as it is unnecessary. They already receive
+  a "CHGHOST" message as part of CAP 'chghost' instead.
+* Updated CAP 'sasl' to specification 3.2 (includes mechlist).
+* Automatically discover SASL server if saslmechlist is sent by services
+  and set::sasl-server is not set by the administrator. This should
+  help to get more networks to support SASL automatically (if you
+  run up to date services, of course)
+* We send "CAP DEL sasl" if set::sasl-server squits and a "CAP NEW"
+  message when the server returns (to cap-notify and CAPv3.2 clients).
+* Added password::type 'spkifp'. It's similar to 'sslclientcertfp' but
+  is a hash based on the public TLS key rather than the certificate.
+  The benefit of this is that the 'spkifp' can stay the same even if
+  you get a new certificate from Let's Encrypt. Note that 'certbot'
+  does not re-use keys by default so you will still get a different
+  spkifp every 60-90 days. Consider using another (3rd party) client
+  or tell the certbot guys to finally implement --reuse-key at
+  https://github.com/certbot/certbot/issues/3788
+* The command './unrealircd spkifp' will output the SPKI fingerprint
+* New option set::handshake-delay will delay the handshake (when a
+  user is connecting) up to this amount of time.
+* If you have any blacklist { } block then UnrealIRCd will set an
+  set::handshake-delay of 2 seconds by default. This will allow (most)
+  DNSBL checking to be finished before the user comes online, while
+  still allowing a smooth user experience.
+  If your DNS(BL) is slow then you could raise this setting slightly.
+* You can now have multiple webirc { } blocks with the same mask.
+  This permits multiple blocks like..
+  webirc {
+      mask *;
+      password "....." { sslclientcertfp; };
   };
-  You can change each of the three classes to 'allow', 'warn' or 'deny'.
-  See: https://www.unrealircd.org/docs/Set_block#set::plaintext-policy
-  If your services do not run on localhost and link without SSL/TLS
-  then you may get an error during linking. In such a case check out:
-  https://www.unrealircd.org/docs/FAQ#ERROR:_Servers_need_to_use_SSL.2FTLS
-* You can now ask UnrealIRCd to verify certificates of server links by:
-  link irc1.test.net {
-      [..]
-      verify-certificate yes;
-  };
-  This will verify the certificate of the link, making sure it is valid,
-  issued for the specified name (irc1.test.net) and given out by a
-  trusted Certificate Authority (like Let's Encrypt).
-  Obviously, if you use self-signed certificates then you can't use this.
-* Introduce a concept called "link security level". This will rate the
-  security of your network from 0 to 2. Whenever security is degraded
-  due to a new server link UnrealIRCd will print a warning about it.
-  See https://www.unrealircd.org/docs/Link_security
-  This also adds a new command /LINKSECURITY (IRCop-only).
-* The plaintext-policy and link-security is shown in "CAP LS".
+  ..should you need it.
+  In other words: we don't stop matching upon an authentication failure.
+* Move CONNECTTIMEOUT to set::handshake-timeout and document it at
+  https://www.unrealircd.org/docs/Set_block#set::handshake-timeout
+* Move MAXUNKNOWNCONNECTIONSPERIP to set::max-unknown-connections-per-ip
+  https://www.unrealircd.org/docs/Set_block#set::max-unknown-connections-per-ip
+* Add set { cloak-method ip; }; which will make cloaking only be done
+  on the IP and thus result in an XX.YY.ZZ.IP cloaked host.
+  This so you can have "IP cloaking" without disabling DNS lookups.
+  GLINES on hosts still work and IRCOps (and yourself) can still see
+  the host in /WHOIS.
+* New option set { ban-include-username yes; }; which will make bans
+  placed by spamfilters (and some other systems) to be placed not on *@ip
+  but on user@ip. Note that this won't work for ZLINE/GZLINE since no
+  no ident/username lookups are done in such cases.
 
 Major issues fixed:
 * None
 
 Minor issues fixed:
-* If you had a link block named irc1.example.net and did an outgoing
-  connect to that server, then the server could introduce himself under
-  a different name, such as irc1.other.net. Not a security issue, since
-  all authentication has to be passed, but this could cause confusing
-  autoconnect attempts.
-* password::sslclientcert did not accept relative paths
-* Compile problem with LibreSSL (regarding SSL_CTX_get0_param)
-* set::modes-on-connect: was refusing certain (old) modes like +N
+* None
+
+Removed:
+* Various old config.h settings that didn't have any effect.
+* A few config.h settings that should never be turned off have been
+  removed altogether (eg: NO_FLOOD_AWAY is now always on).
+* The deprecated and unused commands "CAP CLEAR" and "CAP ACK".
 
 Other changes:
-* The ssl options 'verify-certificate' and 'no-self-signed' have been
-  removed. Use link::verify-certificate instead. It makes no sense to
-  verify certificates or prevent self signed certificates elsewhere
-  such as in vhost or oper, since there is no hostname to match against.
-* Weak cipher suites such as 3DES and RC4 are disabled by default but
-  previously you could still enable them through set::ssl::ciphers.
-  Now you can no longer, since there is no legitimate reason to do so.
-* Update cipher suite to work with TLS 1.3. This ensures you can use
-  TLS 1.3 in UnrealIRCd 4.0.14+ when OpenSSL supports it (in the future).
-* Bump MODDATA_MAX_CLIENT from 8 to 12: needed if you have a lot of
-  3rd party modules loaded. Also moved MODDATA_MAX_* to include/config.h
+* When linking servers and not having any certificate validation,
+  UnrealIRCd will give you specific instructions on how to use
+  password::spkifp or verify-certificate. This to fix a possible
+  Man-in-the-Middle attack. Note that you'll only see this message
+  when linking two servers that are 4.0.16+.
+* When a user does a nick change from a registered nick you will
+  now see the user mode -r. Previously this happened invisibly.
+* The default oper snomask now includes 'S' (spamfilter notices).
 
 Module coders:
-* You can now attach ModData to server objects as well (including &me).
-* Please do not use UmodeDel, CmdoverrideDel and any other *Del()
-  functions from MOD_UNLOAD. These undocumented functions are unnecessary
-  since 2008 or so. UnrealIRCd takes care of unloading all module objects.
-  It can cause a crash if someone unloads the module in UnrealIRCd 4
-  (more specifically: double free if unloading modules which use ModData).
-  Attempts to use these functions in future UnrealIRCd versions may result
-  in a compile error.
+* Please use the following procedure in case of an user/host change:
+  userhost_save_current(acptr);
+  /* now do what you need to do: like change username or hostname */
+  userhost_changed(acptr);
+  This function will take care of notifying other clients about
+  the userhost change, such as doing PART+JOIN+MODE if force-rejoin
+  is enabled, and sending :xx CHGHOST user host messages to
+  "CAP chghost" capable clients.
+
+Services coders:
+* If you provide SASL then please send the mechlist like this:
+  MD client your.services.server saslmechlist :EXTERNAL,PLAIN
+* Don't forget to send an EOS (End Of Synch) as part of the handshake,
+  if you are not doing so already. It's important:
+  :your.services.server EOS
 
 ==[ CHANGES IN OLDER RELEASES ]==
 For changes in previous UnrealIRCd releases see doc/RELEASE-NOTES.old or

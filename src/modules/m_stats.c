@@ -1273,21 +1273,17 @@ int stats_set(aClient *sptr, char *para)
 	if (LINK_BINDIP)
 		sendto_one(sptr, ":%s %i %s :link::bind-ip: %s", me.name, RPL_TEXT,
 		    sptr->name, LINK_BINDIP);
-	sendto_one(sptr, ":%s %i %s :throttle::period: %s", me.name, RPL_TEXT,
-			sptr->name, THROTTLING_PERIOD ? pretty_time_val(THROTTLING_PERIOD) : "disabled");
-	sendto_one(sptr, ":%s %i %s :throttle::connections: %d", me.name, RPL_TEXT,
-			sptr->name, THROTTLING_COUNT ? THROTTLING_COUNT : -1);
+	sendto_one(sptr, ":%s %i %s :anti-flood::connect-flood: %d per %s", me.name, RPL_TEXT,
+			sptr->name, THROTTLING_COUNT, pretty_time_val(THROTTLING_PERIOD));
 	sendto_one(sptr, ":%s %i %s :anti-flood::unknown-flood-bantime: %s", me.name, RPL_TEXT,
 			sptr->name, pretty_time_val(UNKNOWN_FLOOD_BANTIME));
 	sendto_one(sptr, ":%s %i %s :anti-flood::unknown-flood-amount: %ldKB", me.name, RPL_TEXT,
 			sptr->name, UNKNOWN_FLOOD_AMOUNT);
-#ifdef NO_FLOOD_AWAY
 	if (AWAY_PERIOD)
 	{
 		sendto_one(sptr, ":%s %i %s :anti-flood::away-flood: %d per %s", me.name, RPL_TEXT, 
 			sptr->name, AWAY_COUNT, pretty_time_val(AWAY_PERIOD));
 	}
-#endif
 	sendto_one(sptr, ":%s %i %s :anti-flood::nick-flood: %d per %s", me.name, RPL_TEXT, 
 		sptr->name, NICK_COUNT, pretty_time_val(NICK_PERIOD));
 	sendto_one(sptr, ":%s %i %s :ident::connect-timeout: %s", me.name, RPL_TEXT,
@@ -1372,7 +1368,7 @@ int stats_class(aClient *sptr, char *para)
 	{
 		sendto_one(sptr, rpl_str(RPL_STATSYLINE),
 			me.name, sptr->name, classes->name, classes->pingfreq, classes->connfreq,
-			classes->maxclients, classes->sendq, classes->recvq ? classes->recvq : CLIENT_FLOOD);
+			classes->maxclients, classes->sendq, classes->recvq ? classes->recvq : DEFAULT_RECVQ);
 #ifdef DEBUGMODE
 		sendnotice(sptr, "class '%s' has clients=%d, xrefcount=%d",
 			classes->name, classes->clients, classes->xrefcount);

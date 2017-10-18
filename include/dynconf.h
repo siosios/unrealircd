@@ -107,10 +107,8 @@ struct zConfiguration {
 	long unknown_flood_amount;
 	struct ChMode modes_on_join;
 	int level_on_join;
-#ifdef NO_FLOOD_AWAY
 	unsigned char away_count;
 	long away_period;
-#endif
 	unsigned char nick_count;
 	long nick_period;
 	int ident_connect_timeout;
@@ -142,6 +140,10 @@ struct zConfiguration {
 	int ping_cookie;
 	int nicklen;
 	int hide_list;
+	int max_unknown_connections_per_ip;
+	long handshake_timeout;
+	long handshake_delay;
+	int ban_include_username;
 };
 
 #ifndef DYNCONF_C
@@ -206,10 +208,8 @@ extern MODVAR int ipv6_disabled;
 #define MODES_ON_JOIN			iConf.modes_on_join.mode
 #define LEVEL_ON_JOIN			iConf.level_on_join
 
-#ifdef NO_FLOOD_AWAY
 #define AWAY_PERIOD			iConf.away_period
 #define AWAY_COUNT			iConf.away_count
-#endif
 #define NICK_PERIOD			iConf.nick_period
 #define NICK_COUNT			iConf.nick_count
 
@@ -305,10 +305,8 @@ struct SetCheck {
 	unsigned has_anti_flood_unknown_flood_amount:1;
 	unsigned has_modes_on_join:1;
 	unsigned has_level_on_join:1;
-#ifdef NO_FLOOD_AWAY
 	unsigned has_anti_flood_away_count:1;
 	unsigned has_anti_flood_away_period:1;
-#endif
 	unsigned has_anti_flood_nick_flood:1;
 	unsigned has_anti_flood_connect_flood:1;
 	unsigned has_ident_connect_timeout:1;

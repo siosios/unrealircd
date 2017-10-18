@@ -69,6 +69,16 @@ MOD_INIT(m_cap)
 	c.cap = PROTO_CAP_NOTIFY;
 	ClientCapabilityAdd(modinfo->handle, &c);
 
+	memset(&c, 0, sizeof(c));
+	c.name = "chghost";
+	c.cap = PROTO_CAP_CHGHOST;
+	ClientCapabilityAdd(modinfo->handle, &c);
+
+	memset(&c, 0, sizeof(c));
+	c.name = "extended-join";
+	c.cap = PROTO_CAP_EXTENDED_JOIN;
+	ClientCapabilityAdd(modinfo->handle, &c);
+
 	return MOD_SUCCESS;
 }
 
@@ -164,12 +174,13 @@ static void clicap_generate(aClient *sptr, const char *subcmd, int flags)
 	for (cap = clicaps; cap; cap = cap->next)
 	{
 		char name[256];
+		char *param;
 
 		if (cap->visible && !cap->visible(sptr))
 			continue; /* hidden */
 
-		if (cap->parameter)
-			snprintf(name, sizeof(name), "%s=%s", cap->name, cap->parameter(sptr));
+		if ((sptr->local->cap_protocol >= 302) && cap->parameter && (param = cap->parameter(sptr)))
+			snprintf(name, sizeof(name), "%s=%s", cap->name, param);
 		else
 			strlcpy(name, cap->name, sizeof(name));
 

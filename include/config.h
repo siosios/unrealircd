@@ -24,53 +24,19 @@
 
 #include "setup.h"
 
-/*
- *
- *   NOTICE
- *
+/* IMPORTANT:
  * Under normal conditions, you should not have to edit this file.  Run
- * the Config script in the root directory instead!
+ * the ./Config script in the root directory instead!
  *
  * Windows is not a normal condition, edit this file if you use it. :-)
- *
- *
  */
-
- /*
-    * Define this if you're testing/debugging/programming.
-#undef DEBUG
-  */
-
-/* Type of host. These should be made redundant somehow. -avalon */
-
-/*	BSD			Nothing Needed 4.{2,3} BSD, SunOS 3.x, 4.x */
-/*	HPUX			Nothing needed (A.08/A.09) */
-/*	ULTRIX			Nothing needed (4.2) */
-/*	OSF			Nothing needed (1.2) */
-/* #undef	AIX		IBM ugly so-called Unix, AIX */
-/* #undef	MIPS		MIPS Unix */
-/*	SGI			Nothing needed (IRIX 4.0.4) */
-/* #undef 	SVR3		SVR3 stuff - being worked on where poss. */
-/* #undef	DYNIXPTX	Sequents Brain-dead Posix implement. */
-/* #undef	SOL20		Solaris2 */
-/* #undef	ESIX		ESIX */
-/* #undef	NEXT		NeXTStep */
-/* #undef	SVR4 */
 
 /* Additional flags to give FreeBSD's malloc, only play with this if you
  * know what you're doing.
  */
-
 #define MALLOC_FLAGS_EXTRA ""
 
-/*
-    dog3/comstud ircd fdlists
-    undef this to make them work
-*/
-
-#undef NO_FDLIST
-
-/*
+/* I/O Engine: determine what method to use.
  * So, the way this works is we determine using the preprocessor
  * what polling backend to use for the eventloop.  We prefer epoll,
  * followed by kqueue, followed by poll, and then finally select.
@@ -102,33 +68,18 @@
 # define MODULE_SUFFIX	".dll"
 #endif
 
-/*
- * Defining this will allow all ircops to see people in +s channels
- * By default, only net/tech admins can see this
- */
-#define SHOW_SECRET
-
-/*
- * Admin's chat...
- */
-#define ADMINCHAT 1
-
 /* 
  * If channel mode is +z, only send to secure links & people
  *
-*/
+ */
 #undef SECURECHANMSGSONLYGOTOSECURE
 
-/*
-   If you want to support chinese and/or japanese nicks
-*/
+/* If you want to support chinese and/or japanese nicks */
 #undef NICK_GB2312
 #undef NICK_GBK
 #undef NICK_GBK_JAP
 
-/*
-  Remote rehash
-*/
+/* Permit remote /rehash */
 #define REMOTE_REHASH
 
 /*
@@ -150,25 +101,6 @@
 #define REMOTEINC_SPECIALCACHE
 
 /*
- * No spoof code
- *
- * This enables the spoof protection.
- */
-/* #define NOSPOOF 1  */
-
-
-/*
- * Enables locops to override the RFC1459 flood control too
-*/
-#undef NO_FAKE_LAG_FOR_LOCOPS
-
-/*
- * HOSTILENAME - Define this if you want the hostile username patch included,
- *		 it will strip characters that are not 0-9,a-z,A-Z,_,- or .
- */
-#define HOSTILENAME		/* [DO NOT CHANGE!] */
-
-/*
 ** Freelinks garbage collector -Stskeeps
 **
 ** GARBAGE_COLLECT_EVERY - how many seconds between every garbage collect
@@ -180,21 +112,7 @@
 
 #define HOW_MANY_FREELINKS_ALLOWED 	200	/* default: 200 */
 
-/*
- * MAXUNKNOWNCONNECTIONSPERIP
-*/
-#define MAXUNKNOWNCONNECTIONSPERIP 3
-
-
-/* Do these work? I dunno... */
-
-/* #undef	VMS		   Should work for IRC client, not server */
-/* #undef	MAIL50		   If you're running VMS 5.0 */
-/* #undef	PCS		   PCS Cadmus MUNIX, use with BSD flag! */
-
-/*
- * NOTE: On some systems, valloc() causes many problems.
- */
+/* NOTE: On some systems, valloc() causes many problems. */
 #undef	VALLOC			/* Define this if you have valloc(3) */
 
 /*
@@ -250,18 +168,6 @@
  */
 #define	SHOW_INVISIBLE_LUSERS
 
-/*
- * NOTE: defining CMDLINE_CONFIG and installing ircd SUID or SGID is a MAJOR
- *       security problem - they can use the "-f" option to read any files
- *       that the 'new' access lets them. Note also that defining this is
- *       a major security hole if your ircd goes down and some other user
- *       starts up the server with a new conf file that has some extra
- *       O-lines.
- *       Naturally, for non-suid/sgid ircds, this setting does not matter,
- *       hence command line parameters are always permitted then.
- */
-#undef	CMDLINE_CONFIG
-
 /** FAKELAG_CONFIGURABLE makes it possible to make certain classes exempted
  * from 'fake lag' (that is, the artificial delay that is added by the ircd
  * to prevent flooding, which causes the messages/commands of the user to
@@ -291,7 +197,7 @@
 #endif
 
 /*
- * CLIENT_FLOOD
+ * DEFAULT_RECVQ
  *
  * this controls the number of bytes the server will allow a client to
  * send to the server without processing before disconnecting the client for
@@ -299,13 +205,7 @@
  * NOTE: you can now also set this in class::recvq, if that's not present,
  *       this default value will be used.
  */
-#define	CLIENT_FLOOD	8000
-
-/* Anti-Flood options
- * NO_FLOOD_AWAY - enables limiting of how frequently a client can set /away
- */
-
-#define NO_FLOOD_AWAY
+#define	DEFAULT_RECVQ	8000
 
 /* You can define the nickname of NickServ here (usually "NickServ").
  * This is ONLY used for the ""infamous IDENTIFY feature"", which is:
@@ -335,8 +235,11 @@
 
 /*
  * Maximum number of network connections your server will allow.
- * This is usually configured via ./Config on *NIX,
- * the setting mentioned below is the default for Windows.
+ * On *NIX this is configured via ./Config so don't set it here.
+ * The setting below is the Windows (default) setting and isn't actually
+ * the maximum number of network connections but the highest FD (File
+ * Descriptor) that we can deal with.
+ *
  * 2004-10-13: 1024 -> 4096
  */
 #ifndef MAXCONNECTIONS
@@ -364,45 +267,12 @@
 #endif
 
 /*
- * Time interval to wait and if no messages have been received, then check for
- * pings, outgoing connects, events, and a couple of other things.
- * Imo this is quite useless nowdays, it only saves _some_ cpu on tiny networks
- * with like 10 users all of them being inactive. On a normal network with >30
- * users this value is completely irrelevant.
- * The original value here was 60 (which was [hopefuly] never reached and was
- * stupid anyway), changed to 2.
- * DO NOT SET THIS TO ANYTHING MORE THAN 5. BETTER YET, JUST LEAVE IT AT 2!
- */
-#define TIMESEC  2
-/*
  * Maximum delay for socket loop (in miliseconds, so 1000 = 1 second). 
  * This means any other events and such may be delayed up to this value
  * when there is no socket data waiting for us (no clients sending anything).
  * Was 2000ms in 3.2.x, 1000ms for versions below 3.4-alpha4.
  */
 #define SOCKETLOOP_MAX_DELAY 500
-
-/*
- * If daemon doesn't receive anything from any of its links within
- * PINGFREQUENCY seconds, then the server will attempt to check for
- * an active link with a PING message. If no reply is received within
- * (PINGFREQUENCY * 2) seconds, then the connection will be closed.
- * NOTE: This is simply the class::pingfreq for the default class, nothing fancy ;)
- */
-#define PINGFREQUENCY    120	/* Recommended value: 120 */
-
-/*
- * Number of seconds to wait for write to complete if stuck.
- */
-#define WRITEWAITDELAY     15	/* Recommended value: 15 */
-
-/*
- * Number of seconds to wait for a connect(2) call to complete.
- * NOTE: this must be at *LEAST* 10.  When a client connects, it has
- * CONNECTTIMEOUT - 10 seconds for its host to respond to an ident lookup
- * query and for a DNS answer to be retrieved.
- */
-#define	CONNECTTIMEOUT	30	/* Recommended value: 60 */
 
 /*
  * Max time from the nickname change that still causes KILL
@@ -546,12 +416,12 @@ error You stuffed up config.h signals
 #endif
 # define stricmp strcasecmp
 # define strnicmp strncasecmp
-#if defined(CLIENT_FLOOD)
-#    if (CLIENT_FLOOD < 512)
-     error CLIENT_FLOOD needs redefining.
+#if defined(DEFAULT_RECVQ)
+#    if (DEFAULT_RECVQ < 512)
+     error DEFAULT_RECVQ needs redefining.
 #    endif
 #else
-     error CLIENT_FLOOD undefined
+     error DEFAULT_RECVQ undefined
 #endif
 #if (NICKNAMEHISTORYLENGTH < 100)
 #  define NICKNAMEHISTORYLENGTH 100

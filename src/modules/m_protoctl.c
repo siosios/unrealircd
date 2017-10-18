@@ -304,11 +304,11 @@ CMD_FUNC(m_protoctl)
 			servername = strtoken(&p, buf, ",");
 			if (!servername || (strlen(servername) > HOSTLEN) || !index(servername, '.'))
 			{
-				sendto_one(sptr, "ERROR :Bogus server name in EAUTH (%s)", servername);
+				sendto_one(sptr, "ERROR :Bogus server name in EAUTH (%s)", servername ? servername : "");
 				sendto_snomask
 				    (SNO_JUNK,
 				    "WARNING: Bogus server name (%s) from %s in EAUTH (maybe just a fishy client)",
-				    servername, get_client_name(cptr, TRUE));
+				    servername ? servername : "", get_client_name(cptr, TRUE));
 
 				return exit_client(cptr, sptr, &me, "Bogus server name");
 			}
@@ -335,6 +335,11 @@ CMD_FUNC(m_protoctl)
 
 			SetEAuth(cptr);
 			make_server(cptr); /* allocate and set cptr->serv */
+			/* Set cptr->name but don't add to hash list. The real work on
+			 * that is done in m_server. We just set it here for display
+			 * purposes of error messages (such as reject due to clock).
+			 */
+			strlcpy(cptr->name, servername, sizeof(cptr->name));
 			if (protocol)
 				cptr->serv->features.protocol = atoi(protocol);
 			if (!IsHandshake(cptr) && aconf) /* Send PASS early... */
