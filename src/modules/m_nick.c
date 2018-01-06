@@ -22,12 +22,6 @@
 
 #include "unrealircd.h"
 
-CMD_FUNC(m_nick);
-CMD_FUNC(m_uid);
-DLLFUNC int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, char *umode, char *virthost, char *ip);
-
-#define MSG_NICK 	"NICK"	
-
 ModuleHeader MOD_HEADER(m_nick)
   = {
 	"m_nick",
@@ -36,6 +30,15 @@ ModuleHeader MOD_HEADER(m_nick)
 	"3.2-b8-1",
 	NULL 
     };
+
+#define MSG_NICK 	"NICK"	
+
+/* Forward declarations */
+CMD_FUNC(m_nick);
+CMD_FUNC(m_uid);
+DLLFUNC int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, char *umode, char *virthost, char *ip);
+int	AllowClient(aClient *cptr, struct hostent *hp, char *sockhost, char *username);
+int check_client(aClient *cptr, char *username);
 
 MOD_TEST(m_nick)
 {
@@ -253,6 +256,12 @@ CMD_FUNC(m_uid)
 	int  differ = 1, update_watch = 1;
 	unsigned char removemoder = 1;
 
+	if (parc < 13)
+	{
+		sendto_one(sptr, err_str(ERR_NEEDMOREPARAMS), me.name, sptr->name, "UID");
+		return 0;
+	}
+
 	if (!IsServer(cptr))
 		strlcpy(nick, parv[1], iConf.nicklen + 1);
 	else
@@ -404,6 +413,23 @@ CMD_FUNC(m_uid)
 			goto nickkill2done;
 		}
 
+		if (acptr->user == NULL)
+		{
+			/* This is a Bad Thing */
+			sendto_umode(UMODE_OPER, "Lost user field for %s in change from %s",
+			    acptr->name, get_client_name(cptr, FALSE));
+			ircstp->is_kill++;
+			sendto_one(acptr, ":%s KILL %s :%s (Lost user field!)",
+			    me.name, acptr->name, me.name);
+			acptr->flags |= FLAGS_KILLED;
+			/* Here's the previous versions' desynch.  If the old one is
+			   messed up, trash the old one and accept the new one.
+			   Remember - at this point there is a new nick coming in!
+			   Handle appropriately. -- Barubary */
+			exit_client(NULL, acptr, &me, "Lost user field");
+			goto nickkill2done;
+		}
+
 		if (parc > 3)
 		{
 			lastnick = atol(parv[3]);
@@ -456,6 +482,8 @@ nickkill2done:
 	{
 		/* A server introducing a new client, change source */
 
+		if (serv == NULL)
+			serv = sptr;
 		sptr = make_client(cptr, serv);
 		strlcpy(sptr->id, parv[6], IDLEN);
 		add_client_to_list(sptr);
@@ -918,6 +946,8 @@ CMD_FUNC(m_nick)
 	{
 		/* A server introducing a new client, change source */
 
+		if (serv == NULL)
+			serv = sptr;
 		sptr = make_client(cptr, serv);
 		add_client_to_list(sptr);
 		if (parc > 2)
@@ -1187,22 +1217,16 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 	{
 	        char temp[USERLEN + 1];
 	        
-		if ((i = check_client(sptr, username))) {
-			/* This had return i; before -McSkaf */
-			if (i == -5)
-				return FLUSH_BUFFER;
-
-			sendto_snomask(SNO_CLIENT,
-			    "*** %s from %s.",
-			    i == -3 ? "Too many connections" :
-			    "Unauthorized connection", get_client_host(sptr));
+		if ((i = check_client(sptr, username)))
+		{
 			ircstp->is_ref++;
-			ircsnprintf(mo, sizeof(mo), "This server is full.");
-			return
-			    exit_client(cptr, sptr, &me,
-			    i ==
-			    -3 ? mo :
-			    "You are not authorized to connect to this server");
+			/* Usually the return value of check_client is 0 (allow) or -5 (reject),
+			 * but there are some rare cases where the client is not yet killed,
+			 * so have a generic exit_client() here to be safe.
+			 */
+			if (i != FLUSH_BUFFER)
+				return exit_client(cptr, sptr, &me, "Rejected");
+			return FLUSH_BUFFER;
 		}
 
 		if (sptr->local->hostp)
@@ -1389,6 +1413,13 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 
 		IRCstats.unknown--;
 		IRCstats.me_clients++;
+
+		if (IsSecure(sptr))
+		{
+			sptr->umodes |= UMODE_SECURE;
+			RunHook(HOOKTYPE_SECURE_CONNECT, sptr);
+		}
+
 		if (IsHidden(sptr))
 			ircd_log(LOG_CLIENT, "Connect - %s!%s@%s [VHOST %s]", nick,
 				user->username, user->realhost, user->virthost);
@@ -1410,7 +1441,7 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 		if (IsHidden(sptr))
 			sendto_one(sptr, err_str(RPL_HOSTHIDDEN), me.name, sptr->name, user->virthost);
 
-		if (sptr->flags & FLAGS_SSL)
+		if (IsSecureConnect(sptr))
 		{
 			if (sptr->local->ssl && !iConf.no_connect_ssl_info)
 			{
@@ -1442,8 +1473,6 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 		if (u1)
 			sendto_one(sptr, err_str(ERR_HOSTILENAME), me.name,
 			    sptr->name, olduser, userbad, stripuser);
-		if (IsSecure(sptr))
-			sptr->umodes |= UMODE_SECURE;
 	}
 	else if (IsServer(cptr))
 	{
@@ -1607,3 +1636,187 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 	return 0;
 }
 
+/* This used to initialize the various name strings used to store hostnames.
+ * But nowadays this takes place much earlier (in add_connection?).
+ * It's mainly used for "localhost" and WEBIRC magic only now...
+ */
+int check_init(aClient *cptr, char *sockn, size_t size)
+{
+	strlcpy(sockn, cptr->local->sockhost, HOSTLEN);
+	
+	RunHookReturnInt3(HOOKTYPE_CHECK_INIT, cptr, sockn, size, ==0);
+
+	/* Some silly hack to convert 127.0.0.1 and such into 'localhost' */
+	if (!strcmp(GetIP(cptr), "127.0.0.1") || !strcmp(GetIP(cptr), "0:0:0:0:0:0:0:1") || !strcmp(GetIP(cptr), "0:0:0:0:0:ffff:127.0.0.1"))
+	{
+		if (cptr->local->hostp)
+		{
+			unreal_free_hostent(cptr->local->hostp);
+			cptr->local->hostp = NULL;
+		}
+		strlcpy(sockn, "localhost", HOSTLEN);
+	}
+
+	return 0;
+}
+
+/*
+ * Ordinary client access check. Look for conf lines which have the same
+ * status as the flags passed.
+ *  0 = Success
+ * -1 = Access denied
+ * -2 = Bad socket.
+ */
+int check_client(aClient *cptr, char *username)
+{
+	static char sockname[HOSTLEN + 1];
+	struct hostent *hp = NULL;
+	int  i;
+	
+	ClearAccess(cptr);
+	Debug((DEBUG_DNS, "ch_cl: check access for %s[%s]", cptr->name, cptr->local->sockhost));
+
+	if (check_init(cptr, sockname, sizeof(sockname)))
+		return -2;
+
+	hp = cptr->local->hostp;
+
+	if ((i = AllowClient(cptr, hp, sockname, username)))
+		return i;
+
+	Debug((DEBUG_DNS, "ch_cl: access ok: %s[%s]", cptr->name, sockname));
+
+	return 0;
+}
+
+/** Allow or reject the client based on allow { } blocks and all other restrictions.
+ * @returns Must return 0 if user is permitted. If the client should be rejected then
+ * use return exit_client(...)
+ */
+int	AllowClient(aClient *cptr, struct hostent *hp, char *sockhost, char *username)
+{
+	ConfigItem_allow *aconf;
+	char *hname;
+	int  i, ii = 0;
+	static char uhost[HOSTLEN + USERLEN + 3];
+	static char fullname[HOSTLEN + 1];
+
+	if (!IsSecure(cptr) && (iConf.plaintext_policy_user == PLAINTEXT_POLICY_DENY))
+	{
+		return exit_client(cptr, cptr, &me, iConf.plaintext_policy_user_message);
+	}
+
+	for (aconf = conf_allow; aconf; aconf = (ConfigItem_allow *) aconf->next)
+	{
+		if (!aconf->hostname || !aconf->ip)
+			goto attach;
+		if (aconf->auth && !cptr->local->passwd && aconf->flags.nopasscont)
+			continue;
+		if (aconf->flags.ssl && !IsSecure(cptr))
+			continue;
+		if (hp && hp->h_name)
+		{
+			hname = hp->h_name;
+			strlcpy(fullname, hname, sizeof(fullname));
+			Debug((DEBUG_DNS, "a_il: %s->%s", sockhost, fullname));
+			if (index(aconf->hostname, '@'))
+			{
+				if (aconf->flags.noident)
+					strlcpy(uhost, username, sizeof(uhost));
+				else
+					strlcpy(uhost, cptr->username, sizeof(uhost));
+				strlcat(uhost, "@", sizeof(uhost));
+			}
+			else
+				*uhost = '\0';
+			strlcat(uhost, fullname, sizeof(uhost));
+			if (!match(aconf->hostname, uhost))
+				goto attach;
+		}
+
+		if (index(aconf->ip, '@'))
+		{
+			if (aconf->flags.noident)
+				strlcpy(uhost, username, sizeof(uhost));
+			else
+				strlcpy(uhost, cptr->username, sizeof(uhost));
+			(void)strlcat(uhost, "@", sizeof(uhost));
+		}
+		else
+			*uhost = '\0';
+		strlcat(uhost, sockhost, sizeof(uhost));
+		/* Check the IP */
+		if (match_user(aconf->ip, cptr, MATCH_CHECK_IP))
+			goto attach;
+
+		/* Hmm, localhost is a special case, hp == NULL and sockhost contains
+		 * 'localhost' instead of an ip... -- Syzop. */
+		if (!strcmp(sockhost, "localhost"))
+		{
+			if (index(aconf->hostname, '@'))
+			{
+				if (aconf->flags.noident)
+					strlcpy(uhost, username, sizeof(uhost));
+				else
+					strlcpy(uhost, cptr->username, sizeof(uhost));
+				strlcat(uhost, "@localhost", sizeof(uhost));
+			}
+			else
+				strcpy(uhost, "localhost");
+
+			if (!match(aconf->hostname, uhost))
+				goto attach;
+		}
+
+		continue;
+	      attach:
+/*		if (index(uhost, '@'))  now flag based -- codemastr */
+		if (!aconf->flags.noident)
+			cptr->flags |= FLAGS_DOID;
+		if (!aconf->flags.useip && hp)
+			strlcpy(uhost, fullname, sizeof(uhost));
+		else
+			strlcpy(uhost, sockhost, sizeof(uhost));
+		set_sockhost(cptr, uhost);
+
+		if (aconf->maxperip)
+		{
+			aClient *acptr, *acptr2;
+
+			ii = 1;
+			list_for_each_entry_safe(acptr, acptr2, &lclient_list, lclient_node)
+			{
+				if (!strcmp(GetIP(acptr), GetIP(cptr)))
+				{
+					ii++;
+					if (ii > aconf->maxperip)
+					{
+						/* Already got too many with that ip# */
+						return exit_client(cptr, cptr, &me, iConf.reject_message_too_many_connections);
+					}
+				}
+			}
+		}
+		if ((i = Auth_Check(cptr, aconf->auth, cptr->local->passwd)) == -1)
+		{
+			return exit_client(cptr, cptr, &me, iConf.reject_message_password_mismatch);
+		}
+		if ((i == 2) && (cptr->local->passwd))
+		{
+			MyFree(cptr->local->passwd);
+			cptr->local->passwd = NULL;
+		}
+		if (!((aconf->class->clients + 1) > aconf->class->maxclients))
+		{
+			cptr->local->class = aconf->class;
+			cptr->local->class->clients++;
+		}
+		else
+		{
+			sendto_one(cptr, rpl_str(RPL_REDIR), me.name, cptr->name, aconf->server ? aconf->server : defserv, aconf->port ? aconf->port : 6667);
+			return exit_client(cptr, cptr, &me, iConf.reject_message_server_full);
+		}
+		return 0;
+	}
+	return exit_client(cptr, cptr, &me, iConf.reject_message_unauthorized);
+}

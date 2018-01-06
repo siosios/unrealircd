@@ -263,9 +263,7 @@ int _verify_link(aClient *cptr, aClient *sptr, char *servername, ConfigItem_link
 		 */
 
 		/* Actually we still need to double check the servername to avoid confusion. */
-		link = Find_link(servername, cptr);
-
-		if (!link || strcasecmp(link->servername, cptr->serv->conf->servername))
+		if (strcasecmp(servername, cptr->serv->conf->servername))
 		{
 			ircsnprintf(xerrmsg, sizeof(xerrmsg), "Outgoing connect from link block '%s' but server "
 				"introduced himself as '%s'. Server name mismatch.",
@@ -590,6 +588,12 @@ CMD_FUNC(m_server_remote)
 	char	info[REALLEN + 61];
 	char	*servername = parv[1];
 
+	if (parc < 4 || (!*parv[3]))
+	{
+		sendto_one(sptr, "ERROR :Not enough SERVER parameters");
+		return 0;
+	}
+
 	if ((acptr = find_server(servername, NULL)))
 	{
 		/* Found. Bad. Quit. */
@@ -777,8 +781,11 @@ void tls_link_notification_verify(aClient *acptr, ConfigItem_link *aconf)
 	if (!ssl_fp || !spki_fp)
 		return; /* wtf ? */
 
-	if (acptr->serv->features.protocol < 4016)
-		return; /* don't bother for now */
+	/* Only bother the user if we are linking to UnrealIRCd 4.0.16+,
+	 * since only for these versions we can give precise instructions.
+	 */
+	if (!acptr->serv || acptr->serv->features.protocol < 4016)
+		return;
 
 	sendto_realops("You may want to consider verifying this server link.");
 	sendto_realops("More information about this can be found on https://www.unrealircd.org/Link_verification");

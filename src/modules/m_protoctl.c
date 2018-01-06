@@ -63,7 +63,7 @@ CMD_FUNC(m_protoctl)
 	int  remove = 0;
 #endif
 	int first_protoctl = (GotProtoctl(sptr)) ? 0 : 1; /**< First PROTOCTL we receive? Special ;) */
-	char proto[128], *s;
+	char proto[512], *s;
 /*	static char *dummyblank = "";	Yes, it is kind of ugly */
 
 	if (!MyConnect(sptr))
@@ -251,14 +251,24 @@ CMD_FUNC(m_protoctl)
 		{
 			if (!IsServer(cptr) && !IsEAuth(cptr) && !IsHandshake(cptr))
 				continue;
-			/* Ok, server is either authenticated, or is an outgoing connect...
-			 * We now compare the character sets to see if we should warn opers about any mismatch...
+			/* Ok, server is either authenticated, or is an outgoing connect... */
+			/* Some combinations are fatal because they would lead to mass-kills:
+			 * - use of 'utf8' on our server but not on theirs
 			 */
-			if (strcmp(s+10, langsinuse))
+			if (strstr(charsys_get_current_languages(), "utf8") && !strstr(s+10, "utf8"))
+			{
+				char buf[512];
+				snprintf(buf, sizeof(buf), "Server %s has utf8 in set::allowed-nickchars but %s does not. Link rejected.",
+					me.name, *sptr->name ? sptr->name : "other side");
+				sendto_realops("\002ERROR\001 %s", buf);
+				return exit_client(cptr, sptr, &me, buf);
+			}
+			/* We compare the character sets to see if we should warn opers about any mismatch... */
+			if (strcmp(s+10, charsys_get_current_languages()))
 			{
 				sendto_realops("\002WARNING!!!!\002 Link %s does not have the same set::allowed-nickchars settings (or is "
 							"a different UnrealIRCd version), this MAY cause display issues. Our charset: '%s', theirs: '%s'",
-					get_client_name(cptr, FALSE), langsinuse, s+10);
+					get_client_name(cptr, FALSE), charsys_get_current_languages(), s+10);
 				/* return exit_client(cptr, cptr, &me, "Nick charset mismatch"); */
 			}
 		}
@@ -269,6 +279,9 @@ CMD_FUNC(m_protoctl)
 
 			if (!IsServer(cptr) && !IsEAuth(cptr) && !IsHandshake(cptr))
 				return exit_client(cptr, cptr, &me, "Got PROTOCTL SID before EAUTH, that's the wrong order!");
+
+			if (*sptr->id)
+				return exit_client(cptr, cptr, &me, "Got PROTOCTL SID twice");
 
 			if ((acptr = hash_find_id(sid, NULL)) != NULL)
 			{

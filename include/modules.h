@@ -22,9 +22,9 @@
 #define MODULES_H
 #include "types.h"
 #define MAXCUSTOMHOOKS  30
-#define MAXHOOKTYPES	100
+#define MAXHOOKTYPES	130
 #define MAXCALLBACKS	30
-#define MAXEFUNCTIONS	60
+#define MAXEFUNCTIONS	90
 #if defined(_WIN32)
  #define MOD_EXTENSION "dll"
  #define DLLFUNC	_declspec(dllexport)
@@ -157,6 +157,15 @@ struct _moddatainfo {
 #define EXCHK_ACCESS		0 /* Check access */
 #define EXCHK_ACCESS_ERR	1 /* Check access and send error if needed */
 #define EXCHK_PARAM			2 /* Check parameter and send error if needed */
+
+/* Can bypass message restriction - Types */
+typedef enum BypassChannelMessageRestrictionType {
+	BYPASS_CHANMSG_EXTERNAL = 1,
+	BYPASS_CHANMSG_MODERATED = 2,
+	BYPASS_CHANMSG_COLOR = 3,
+	BYPASS_CHANMSG_CENSOR = 4,
+	BYPASS_CHANMSG_NOTICE = 5,
+} BypassChannelMessageRestrictionType;
 
 #define EXSJ_SAME			0 /* Parameters are the same */
 #define EXSJ_WEWON			1 /* We won! w00t */
@@ -794,10 +803,13 @@ extern char *moddata_client_get(aClient *acptr, char *varname);
 #define HOOKTYPE_DCC_DENIED 87
 #define HOOKTYPE_SERVER_HANDSHAKE_OUT 88
 #define HOOKTYPE_SERVER_SYNCHED	89
+#define HOOKTYPE_SECURE_CONNECT 90
+#define HOOKTYPE_CAN_BYPASS_CHANNEL_MESSAGE_RESTRICTION 91
+
 /* Adding a new hook here?
  * 1) Add the #define HOOKTYPE_.... with a new number
- * 2) Add a hook prototypy (see below)
- * 3) Add typechecking (even more below)
+ * 2) Add a hook prototype (see below)
+ * 3) Add type checking (even more below)
  * 4) Document the hook at https://www.unrealircd.org/docs/Dev:Hook_API
  */
 
@@ -872,7 +884,7 @@ int hooktype_pre_local_chanmode(aClient *cptr, aClient *sptr, aChannel *chptr, c
 int hooktype_pre_remote_chanmode(aClient *cptr, aClient *sptr, aChannel *chptr, char *modebuf, char *parabuf, time_t sendts, int samode);
 int hooktype_join_data(aClient *who, aChannel *chptr);
 int hooktype_pre_knock(aClient *sptr, aChannel *chptr);
-int hooktype_pre_invite(aClient *sptr, aChannel *chptr);
+int hooktype_pre_invite(aClient *sptr, aClient *acptr, aChannel *chptr, int *override);
 int hooktype_oper_invite_ban(aClient *sptr, aChannel *chptr);
 int hooktype_view_topic_outside_channel(aClient *sptr, aChannel *chptr);
 int hooktype_chan_permit_nick_change(aClient *sptr, aChannel *chptr);
@@ -889,6 +901,8 @@ int hooktype_see_channel_in_whois(aClient *sptr, aClient *target, aChannel *chpt
 int hooktype_dcc_denied(aClient *sptr, aClient *target, char *realfile, char *displayfile, ConfigItem_deny_dcc *denydcc);
 int hooktype_server_handshake_out(aClient *sptr);
 int hooktype_server_synched(aClient *sptr);
+int hooktype_secure_connect(aClient *sptr);
+int hooktype_can_bypass_channel_message_restriction(aClient *sptr, aChannel *chptr, BypassChannelMessageRestrictionType bypass_type);
 
 #ifdef GCC_TYPECHECKING
 #define ValidateHook(validatefunc, func) __builtin_types_compatible_p(__typeof__(func), __typeof__(validatefunc))
@@ -982,7 +996,9 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
         ((hooktype == HOOKTYPE_SEE_CHANNEL_IN_WHOIS) && !ValidateHook(hooktype_see_channel_in_whois, func)) || \
         ((hooktype == HOOKTYPE_DCC_DENIED) && !ValidateHook(hooktype_dcc_denied, func)) || \
         ((hooktype == HOOKTYPE_SERVER_HANDSHAKE_OUT) && !ValidateHook(hooktype_server_handshake_out, func)) || \
-        ((hooktype == HOOKTYPE_SERVER_SYNCHED) && !ValidateHook(hooktype_server_synched, func)) ) \
+        ((hooktype == HOOKTYPE_SERVER_SYNCHED) && !ValidateHook(hooktype_server_synched, func)) || \
+        ((hooktype == HOOKTYPE_SECURE_CONNECT) && !ValidateHook(hooktype_secure_connect, func)) || \
+        ((hooktype == HOOKTYPE_CAN_BYPASS_CHANNEL_MESSAGE_RESTRICTION) && !ValidateHook(hooktype_can_bypass_channel_message_restriction, func)) ) \
         _hook_error_incompatible();
 #endif /* GCC_TYPECHECKING */
 
@@ -1050,6 +1066,9 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
 #define EFUNC_USERHOST_SAVE_CURRENT	54
 #define EFUNC_USERHOST_CHANGED		55
 #define EFUNC_SEND_JOIN_TO_LOCAL_USERS		56
+#define EFUNC_DO_NICK_NAME			57
+#define EFUNC_DO_REMOTE_NICK_NAME	58
+#define EFUNC_CHARSYS_GET_CURRENT_LANGUAGES	59
 
 /* Module flags */
 #define MODFLAG_NONE	0x0000

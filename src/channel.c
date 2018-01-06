@@ -704,16 +704,38 @@ int  can_send(aClient *cptr, aChannel *chptr, char *msgtext, int notice)
 	member = IsMember(cptr, chptr);
 
 	if (chptr->mode.mode & MODE_NOPRIVMSGS && !member)
-		return (CANNOT_SEND_NOPRIVMSGS);
+	{
+		/* Channel mode +n. Reject, unless HOOKTYPE_CAN_BYPASS_NO_EXTERNAL_MSGS
+		 * tells otherwise.
+		 */
+		for (h = Hooks[HOOKTYPE_CAN_BYPASS_CHANNEL_MESSAGE_RESTRICTION]; h; h = h->next)
+		{
+			i = (*(h->func.intfunc))(cptr, chptr, BYPASS_CHANMSG_EXTERNAL);
+			if (i != HOOK_CONTINUE)
+				break;
+		}
+		if (i != HOOK_ALLOW)
+			return CANNOT_SEND_NOPRIVMSGS;
+	}
 
 	lp = find_membership_link(cptr->user->channel, chptr);
 	if (chptr->mode.mode & MODE_MODERATED && !op_can_override("override:message:moderated",cptr,chptr,NULL) &&
 	    (!lp
 	    || !(lp->flags & (CHFL_CHANOP | CHFL_VOICE | CHFL_CHANOWNER |
-	    CHFL_HALFOP | CHFL_CHANPROT))))
-	    {
-			return (CANNOT_SEND_MODERATED);
-	    }
+	CHFL_HALFOP | CHFL_CHANPROT))))
+    {
+		/* Channel mode +m. Reject, unless HOOKTYPE_CAN_BYPASS_MODERATED
+		 * tells otherwise.
+		 */
+		for (h = Hooks[HOOKTYPE_CAN_BYPASS_CHANNEL_MESSAGE_RESTRICTION]; h; h = h->next)
+		{
+			i = (*(h->func.intfunc))(cptr, chptr, BYPASS_CHANMSG_MODERATED);
+			if (i != HOOK_CONTINUE)
+				break;
+		}
+		if (i != HOOK_ALLOW)
+			return CANNOT_SEND_MODERATED;
+    }
 
 
 	for (h = Hooks[HOOKTYPE_CAN_SEND]; h; h = h->next)
@@ -921,7 +943,6 @@ char *trim_str(char *str, int len)
  * NOTES:
  * - A pointer is returned to a static buffer, which is overwritten
  *   on next clean_ban_mask or make_nick_user_host call.
- * - mask is fragged in some cases, this could be bad.
  */
 char *clean_ban_mask(char *mask, int what, aClient *cptr)
 {
@@ -929,6 +950,11 @@ char *clean_ban_mask(char *mask, int what, aClient *cptr)
 	char *user;
 	char *host;
 	Extban *p;
+	static char maskbuf[512];
+
+	/* Work on a copy */
+	strlcpy(maskbuf, mask, sizeof(maskbuf));
+	mask = maskbuf;
 
 	cp = index(mask, ' ');
 	if (cp)

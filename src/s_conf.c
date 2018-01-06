@@ -252,11 +252,6 @@ extern void unload_all_unused_snomasks(void);
 extern void unload_all_unused_umodes(void);
 extern void unload_all_unused_extcmodes(void);
 
-extern int charsys_test_language(char *name);
-extern void charsys_add_language(char *name);
-extern void charsys_reset_pretest(void);
-int charsys_postconftest(void);
-void charsys_finish(void);
 int reloadable_perm_module_unloaded(void);
 void special_delayed_unloading(void);
 
@@ -438,7 +433,7 @@ long config_checkval(char *orig, unsigned short flags) {
 				while (isalpha(*text))
 					text++;
 
-				*sz-- = 0;
+				*sz = 0;
 				while (sz-- > value && *sz) {
 					if (isspace(*sz))
 						*sz = 0;
@@ -454,7 +449,7 @@ long config_checkval(char *orig, unsigned short flags) {
 		}
 		mfactor = 1;
 		sz = text;
-		sz--;
+		sz--; /* -1 because we are PAST the end of the string */
 		while (sz-- > value) {
 			if (isspace(*sz))
 				*sz = 0;
@@ -482,7 +477,7 @@ long config_checkval(char *orig, unsigned short flags) {
 				while (isalpha(*text))
 					text++;
 
-				*sz-- = 0;
+				*sz = 0;
 				while (sz-- > value && *sz) {
 					if (isspace(*sz))
 						*sz = 0;
@@ -498,7 +493,7 @@ long config_checkval(char *orig, unsigned short flags) {
 		}
 		mfactor = 1;
 		sz = text;
-		sz--;
+		sz--; /* -1 because we are PAST the end of the string */
 		while (sz-- > value) {
 			if (isspace(*sz))
 				*sz = 0;
@@ -1517,6 +1512,11 @@ void config_setdefaultsettings(aConfiguration *i)
 	i->plaintext_policy_user = PLAINTEXT_POLICY_ALLOW;
 	i->plaintext_policy_oper = PLAINTEXT_POLICY_WARN;
 	i->plaintext_policy_server = PLAINTEXT_POLICY_DENY;
+	
+	i->reject_message_password_mismatch = strdup("Password mismatch");
+	i->reject_message_too_many_connections = strdup("Too many connections from your IP");
+	i->reject_message_server_full = strdup("This server is full");
+	i->reject_message_unauthorized = strdup("You are not authorized to connect to this server");
 }
 
 /** Similar to config_setdefaultsettings but this one is applied *AFTER*
@@ -1695,14 +1695,13 @@ void upgrade_conf_to_34(void)
 /** Reset config tests (before running the config test) */
 void config_test_reset(void)
 {
-	charsys_reset_pretest();
 }
 
 /** Run config test and all post config tests. */
 int config_test_all(void)
 {
 	if ((config_test() < 0) || (callbacks_check() < 0) || (efunctions_check() < 0) ||
-	    (charsys_postconftest() < 0) || ssl_used_in_config_but_unavail() ||
+	    ssl_used_in_config_but_unavail() ||
 	    reloadable_perm_module_unloaded() || !ssl_tests())
 	{
 		return 0;
@@ -1777,7 +1776,6 @@ int	init_conf(char *rootconf, int rehash)
 		}
 		load_includes();
 		Init_all_testing_modules();
-		charsys_reset();
 		if (config_run() < 0)
 		{
 			config_error("Bad case of config errors. Server will now die. This really shouldn't happen");
@@ -1787,7 +1785,6 @@ int	init_conf(char *rootconf, int rehash)
 #endif
 			abort();
 		}
-		charsys_finish();
 		applymeblock();
 		if (old_pid_file && strcmp(old_pid_file, conf_files->pid_file))
 		{
@@ -2840,138 +2837,6 @@ ConfigItem_ban 	*Find_banEx(aClient *sptr, char *host, short type, short type2)
 		}
 	}
 	return NULL;
-}
-
-int	AllowClient(aClient *cptr, struct hostent *hp, char *sockhost, char *username)
-{
-	ConfigItem_allow *aconf;
-	char *hname;
-	int  i, ii = 0;
-	static char uhost[HOSTLEN + USERLEN + 3];
-	static char fullname[HOSTLEN + 1];
-
-	if (!IsSecure(cptr) && (iConf.plaintext_policy_user == PLAINTEXT_POLICY_DENY))
-	{
-		exit_client(cptr, cptr, &me, iConf.plaintext_policy_user_message);
-		return -5;
-	}
-
-	for (aconf = conf_allow; aconf; aconf = (ConfigItem_allow *) aconf->next)
-	{
-		if (!aconf->hostname || !aconf->ip)
-			goto attach;
-		if (aconf->auth && !cptr->local->passwd && aconf->flags.nopasscont)
-			continue;
-		if (aconf->flags.ssl && !IsSecure(cptr))
-			continue;
-		if (hp && hp->h_name)
-		{
-			hname = hp->h_name;
-			strlcpy(fullname, hname, sizeof(fullname));
-			Debug((DEBUG_DNS, "a_il: %s->%s", sockhost, fullname));
-			if (index(aconf->hostname, '@'))
-			{
-				if (aconf->flags.noident)
-					strlcpy(uhost, username, sizeof(uhost));
-				else
-					strlcpy(uhost, cptr->username, sizeof(uhost));
-				strlcat(uhost, "@", sizeof(uhost));
-			}
-			else
-				*uhost = '\0';
-			strlcat(uhost, fullname, sizeof(uhost));
-			if (!match(aconf->hostname, uhost))
-				goto attach;
-		}
-
-		if (index(aconf->ip, '@'))
-		{
-			if (aconf->flags.noident)
-				strlcpy(uhost, username, sizeof(uhost));
-			else
-				strlcpy(uhost, cptr->username, sizeof(uhost));
-			(void)strlcat(uhost, "@", sizeof(uhost));
-		}
-		else
-			*uhost = '\0';
-		strlcat(uhost, sockhost, sizeof(uhost));
-		/* Check the IP */
-		if (match_user(aconf->ip, cptr, MATCH_CHECK_IP))
-			goto attach;
-
-		/* Hmm, localhost is a special case, hp == NULL and sockhost contains
-		 * 'localhost' instead of an ip... -- Syzop. */
-		if (!strcmp(sockhost, "localhost"))
-		{
-			if (index(aconf->hostname, '@'))
-			{
-				if (aconf->flags.noident)
-					strlcpy(uhost, username, sizeof(uhost));
-				else
-					strlcpy(uhost, cptr->username, sizeof(uhost));
-				strlcat(uhost, "@localhost", sizeof(uhost));
-			}
-			else
-				strcpy(uhost, "localhost");
-
-			if (!match(aconf->hostname, uhost))
-				goto attach;
-		}
-
-		continue;
-	      attach:
-/*		if (index(uhost, '@'))  now flag based -- codemastr */
-		if (!aconf->flags.noident)
-			cptr->flags |= FLAGS_DOID;
-		if (!aconf->flags.useip && hp)
-			strlcpy(uhost, fullname, sizeof(uhost));
-		else
-			strlcpy(uhost, sockhost, sizeof(uhost));
-		set_sockhost(cptr, uhost);
-
-		if (aconf->maxperip)
-		{
-			aClient *acptr, *acptr2;
-
-			ii = 1;
-			list_for_each_entry_safe(acptr, acptr2, &lclient_list, lclient_node)
-			{
-				if (!strcmp(GetIP(acptr), GetIP(cptr)))
-				{
-					ii++;
-					if (ii > aconf->maxperip)
-					{
-						exit_client(cptr, cptr, &me,
-							"Too many connections from your IP");
-						return -5;	/* Already got too many with that ip# */
-					}
-				}
-			}
-		}
-		if ((i = Auth_Check(cptr, aconf->auth, cptr->local->passwd)) == -1)
-		{
-			exit_client(cptr, cptr, &me,
-				"Password mismatch");
-			return -5;
-		}
-		if ((i == 2) && (cptr->local->passwd))
-		{
-			MyFree(cptr->local->passwd);
-			cptr->local->passwd = NULL;
-		}
-		if (!((aconf->class->clients + 1) > aconf->class->maxclients))
-		{
-			cptr->local->class = aconf->class;
-			cptr->local->class->clients++;
-		}
-		else
-		{
-			sendto_one(cptr, rpl_str(RPL_REDIR), me.name, cptr->name, aconf->server ? aconf->server : defserv, aconf->port ? aconf->port : 6667);
-			return -3;
-		}
-		return 0;
-	}
-	return -1;
 }
 
 ConfigItem_vhost *Find_vhost(char *name) {
@@ -7532,10 +7397,6 @@ int	_conf_set(ConfigFile *conf, ConfigEntry *ce)
 			else
 				tempiConf.userhost_allowed = UHALLOW_REJOIN;
 		}
-		else if (!strcmp(cep->ce_varname, "allowed-nickchars")) {
-			for (cepp = cep->ce_entries; cepp; cepp=cepp->ce_next)
-				charsys_add_language(cepp->ce_varname);
-		}
 		else if (!strcmp(cep->ce_varname, "channel-command-prefix")) {
 			safestrdup(tempiConf.channel_command_prefix, cep->ce_vardata);
 		}
@@ -7885,6 +7746,20 @@ int	_conf_set(ConfigFile *conf, ConfigEntry *ce)
 		{
 			tempiConf.ban_include_username = config_checkval(cep->ce_vardata, CFG_YESNO);
 		}
+		else if (!strcmp(cep->ce_varname, "reject-message"))
+		{
+			for (cepp = cep->ce_entries; cepp; cepp = cepp->ce_next)
+			{
+				if (!strcmp(cepp->ce_varname, "password-mismatch"))
+					safestrdup(tempiConf.reject_message_password_mismatch, cepp->ce_vardata);
+				else if (!strcmp(cepp->ce_varname, "too-many-connections"))
+					safestrdup(tempiConf.reject_message_too_many_connections, cepp->ce_vardata);
+				else if (!strcmp(cepp->ce_varname, "server-full"))
+					safestrdup(tempiConf.reject_message_server_full, cepp->ce_vardata);
+				else if (!strcmp(cepp->ce_varname, "unauthorized"))
+					safestrdup(tempiConf.reject_message_unauthorized, cepp->ce_vardata);
+			}
+		}
 		else
 		{
 			int value;
@@ -8103,25 +7978,6 @@ int	_test_set(ConfigFile *conf, ConfigEntry *ce)
 					cep->ce_varlinenum);
 				errors++;
 				continue;
-			}
-		}
-		else if (!strcmp(cep->ce_varname, "allowed-nickchars")) {
-			if (cep->ce_vardata)
-			{
-				config_error("%s:%i: set::allowed-nickchars: please use 'allowed-nickchars { name; };' "
-				             "and not 'allowed-nickchars name;'",
-				             cep->ce_fileptr->cf_filename, cep->ce_varlinenum);
-				errors++;
-				continue;
-			}
-			for (cepp = cep->ce_entries; cepp; cepp=cepp->ce_next)
-			{
-				if (!charsys_test_language(cepp->ce_varname))
-				{
-					config_error("%s:%i: set::allowed-nickchars: Unknown (sub)language '%s'",
-						cep->ce_fileptr->cf_filename, cep->ce_varlinenum, cepp->ce_varname);
-					errors++;
-				}
 			}
 		}
 		else if (!strcmp(cep->ce_varname, "anti-spam-quit-message-time")) {
@@ -8825,6 +8681,29 @@ int	_test_set(ConfigFile *conf, ConfigEntry *ce)
 		else if (!strcmp(cep->ce_varname, "ban-include-username"))
 		{
 			CheckNull(cep);
+		}
+		else if (!strcmp(cep->ce_varname, "reject-message"))
+		{
+			for (cepp = cep->ce_entries; cepp; cepp = cepp->ce_next)
+			{
+				CheckNull(cepp);
+				if (!strcmp(cepp->ce_varname, "password-mismatch"))
+					;
+				else if (!strcmp(cepp->ce_varname, "too-many-connections"))
+					;
+				else if (!strcmp(cepp->ce_varname, "server-full"))
+					;
+				else if (!strcmp(cepp->ce_varname, "unauthorized"))
+					;
+				else
+				{
+					config_error_unknown(cepp->ce_fileptr->cf_filename,
+						cepp->ce_varlinenum, "set::reject-message",
+						cepp->ce_varname);
+					errors++;
+					continue;
+				}
+			}
 		}
 		else
 		{

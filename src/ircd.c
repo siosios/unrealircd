@@ -652,6 +652,7 @@ EVENT(check_deadsockets)
 #ifdef DEBUGMODE
 			ircd_log(LOG_ERROR, "Closing deadsock: %d/%s", cptr->fd, cptr->name);
 #endif
+			cptr->flags &= ~FLAGS_DEADSOCKET; /* CPR. So we send the error. */
 			(void)exit_client(cptr, cptr, &me, cptr->local->error_str ? cptr->local->error_str : "Dead socket");
 			continue;
 		}
@@ -664,6 +665,7 @@ EVENT(check_deadsockets)
 #ifdef DEBUGMODE
 			ircd_log(LOG_ERROR, "Closing deadsock: %d/%s", cptr->fd, cptr->name);
 #endif
+			cptr->flags &= ~FLAGS_DEADSOCKET; /* CPR. So we send the error. */
 			(void)exit_client(cptr, cptr, &me, cptr->local->error_str ? cptr->local->error_str : "Dead socket");
 			continue;
 		}
@@ -1049,7 +1051,6 @@ int InitUnrealIRCd(int argc, char *argv[])
 #endif
 	bzero(&StatsZ, sizeof(StatsZ));
 	setup_signals();
-	charsys_reset();
 
 	memset(&IRCstats, '\0', sizeof(ircstats));
 	IRCstats.servers = 1;
@@ -1182,6 +1183,11 @@ int InitUnrealIRCd(int argc, char *argv[])
 			      (long)sizeof(struct ircstatsx));
 			  exit(0);
 			  break;
+#if 0
+		case 'S':
+			charsys_dump_table(p ? p : "*");
+			exit(0);
+#endif
 #ifndef _WIN32
 		  case 't':
 			  bootopt |= BOOT_TTY;
