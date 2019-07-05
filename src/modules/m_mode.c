@@ -695,7 +695,7 @@ void make_mode_str(aChannel *chptr, long oldm, Cmode_t oldem, long oldl, int pco
 		chptr->mode.extmode = oldem;
 	}
 	z = strlen(para_buf);
-	if (para_buf[z - 1] == ' ')
+	if ((z > 0) && (para_buf[z - 1] == ' '))
 		para_buf[z - 1] = '\0';
 	*x = '\0';
 	if (*mode_buf == '\0')
@@ -1065,7 +1065,7 @@ int  do_mode_char(aChannel *chptr, long modetype, char modechar, char *param,
 			if (BadPtr(tmpstr))
 			{
 				/* Invalid ban. See if we can send an error about that */
-				if ((param[0] == '~') && MyClient(cptr) && !bounce)
+				if ((param[0] == '~') && MyClient(cptr) && !bounce && (strlen(param) > 2))
 				{
 					Extban *p = findmod_by_bantype(param[1]);
 					if (p && p->is_ok)
@@ -1113,7 +1113,7 @@ int  do_mode_char(aChannel *chptr, long modetype, char modechar, char *param,
 			tmpstr = clean_ban_mask(param, what, cptr);
 			if (BadPtr(tmpstr))
 				break; /* ignore except, but eat param */
-			if ((tmpstr[0] == '~') && MyClient(cptr) && !bounce)
+			if ((tmpstr[0] == '~') && MyClient(cptr) && !bounce && (strlen(param) > 2))
 			{
 				/* extban: check access if needed */
 				Extban *p = findmod_by_bantype(tmpstr[1]);
@@ -1152,7 +1152,7 @@ int  do_mode_char(aChannel *chptr, long modetype, char modechar, char *param,
 			tmpstr = clean_ban_mask(param, what, cptr);
 			if (BadPtr(tmpstr))
 				break; /* ignore except, but eat param */
-			if ((tmpstr[0] == '~') && MyClient(cptr) && !bounce)
+			if ((tmpstr[0] == '~') && MyClient(cptr) && !bounce && (strlen(param) > 2))
 			{
 				/* extban: check access if needed */
 				Extban *p = findmod_by_bantype(tmpstr[1]);
@@ -1313,32 +1313,6 @@ int do_extmode_char(aChannel *chptr, Cmode *handler, char *param, u_int what,
 	}
 	return paracnt;
 }
-
-/*
- * ListBits(bitvalue, bitlength);
- * written by Stskeeps
-*/
-#ifdef DEVELOP
-char *ListBits(long bits, long length)
-{
-	char *bitstr, *p;
-	long l, y;
-	y = 1;
-	bitstr = (char *)MyMalloc(length + 1);
-	p = bitstr;
-	for (l = 1; l <= length; l++)
-	{
-		if (bits & y)
-			*p = '1';
-		else
-			*p = '0';
-		p++;
-		y = y + y;
-	}
-	*p = '\0';
-	return (bitstr);
-}
-#endif
 
 /** In 2003 I introduced PROTOCTL CHANMODES= so remote servers (and services)
  * could deal with unknown "parameter eating" channel modes, minimizing desynchs.
@@ -1573,6 +1547,7 @@ CMD_FUNC(_m_umode)
 	aClient *acptr;
 	int what, setsnomask = 0;
 	long oldumodes = 0;
+	int oldsnomasks = 0;
 	/* (small note: keep 'what' as an int. -- Syzop). */
 	short rpterror = 0, umode_restrict_err = 0, chk_restrict = 0, modex_err = 0;
 
@@ -1617,6 +1592,10 @@ CMD_FUNC(_m_umode)
 	for (i = 0; i <= Usermode_highest; i++)
 		if ((sptr->umodes & Usermode_Table[i].mode))
 			oldumodes |= Usermode_Table[i].mode;
+
+	for (i = 0; i <= Snomask_highest; i++)
+		if ((sptr->user->snomask & Snomask_Table[i].mode))
+			oldsnomasks |= Snomask_Table[i].mode;
 
 	if (RESTRICT_USERMODES && MyClient(sptr) && !ValidatePermissionsForPath("self:restrictedumodes",sptr,NULL,NULL,NULL))
 		chk_restrict = 1;
@@ -1755,7 +1734,51 @@ CMD_FUNC(_m_umode)
 	/* Don't let non-ircops set ircop-only modes or snomasks */
 	if (!ValidatePermissionsForPath("self:restrictedumodes",sptr,NULL,NULL,NULL))
 	{
-		remove_oper_privileges(sptr, 0);
+		if ((oldumodes & UMODE_OPER) && IsOper(sptr))
+		{
+			/* User is an oper but does not have the self:restrictedumodes capability.
+			 * This only happens for heavily restricted IRCOps.
+			 * Fixes bug https://bugs.unrealircd.org/view.php?id=5130
+			 */
+			int i;
+
+			/* MODES */
+			for (i = 0; i <= Usermode_highest; i++)
+			{
+				if (!Usermode_Table[i].flag)
+					continue;
+				if (Usermode_Table[i].unset_on_deoper)
+				{
+					/* This is an oper mode. Is it set now and wasn't earlier?
+					 * then it needs to be stripped, as setting it is not
+					 * permitted.
+					 */
+					long m = Usermode_Table[i].mode;
+					if ((sptr->umodes & m) && !(oldumodes & m))
+						sptr->umodes &= ~Usermode_Table[i].mode; /* remove */
+				}
+			}
+
+			/* SNOMASKS */
+			for (i = 0; i <= Snomask_highest; i++)
+			{
+				if (!Snomask_Table[i].flag)
+					continue;
+				if (Snomask_Table[i].unset_on_deoper)
+				{
+					/* This is an oper snomask. Is it set now and wasn't earlier?
+					 * then it needs to be stripped, as setting it is not
+					 * permitted.
+					 */
+					int sno = Snomask_Table[i].mode;
+					if ((sptr->user->snomask & sno) && !(oldsnomasks & sno))
+						sptr->user->snomask &= ~Snomask_Table[i].mode; /* remove */
+				}
+			}
+		} else {
+			/* User isn't an ircop at all. The solution is simple: */
+			remove_oper_privileges(sptr, 0);
+		}
 	}
 
 	if (MyClient(sptr) && !ValidatePermissionsForPath("override:secure",sptr,NULL,NULL,NULL) &&

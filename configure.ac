@@ -8,7 +8,7 @@ dnl src/win32/unrealinst.iss
 dnl .CHANGES.NEW
 dnl src/version.c.SH
 
-AC_INIT([unrealircd], [4.0.18-devel], [http://bugs.unrealircd.org/], [], [http://unrealircd.org/])
+AC_INIT([unrealircd], [4.0.19-rc2], [http://bugs.unrealircd.org/], [], [http://unrealircd.org/])
 AC_CONFIG_SRCDIR([src/ircd.c])
 AC_CONFIG_HEADER([include/setup.h])
 AC_CONFIG_AUX_DIR([autoconf])
@@ -36,13 +36,13 @@ UNREAL_VERSION_MAJOR=["0"]
 AC_DEFINE_UNQUOTED([UNREAL_VERSION_MAJOR], [$UNREAL_VERSION_MAJOR], [Major version number (e.g.: Y for X.Y.Z)])
 
 # Minor version number (e.g.: Z in X.Y.Z)
-UNREAL_VERSION_MINOR=["18"]
+UNREAL_VERSION_MINOR=["19"]
 AC_DEFINE_UNQUOTED([UNREAL_VERSION_MINOR], [$UNREAL_VERSION_MINOR], [Minor version number (e.g.: Z for X.Y.Z)])
 
 # The version suffix such as a beta marker or release candidate
 # marker. (e.g.: -rcX for unrealircd-3.2.9-rcX). This macro is a
 # string instead of an integer because it contains arbitrary data.
-UNREAL_VERSION_SUFFIX=["-devel"]
+UNREAL_VERSION_SUFFIX=["-rc2"]
 AC_DEFINE_UNQUOTED([UNREAL_VERSION_SUFFIX], ["$UNREAL_VERSION_SUFFIX"], [Version suffix such as a beta marker or release candidate marker. (e.g.: -rcX for unrealircd-3.2.9-rcX)])
 
 AC_PROG_CC
@@ -59,19 +59,64 @@ CFLAGS="-pipe $CFLAGS"
 fi
 fi
 
-dnl (the gcc flag detection trick is taken from xemacs/Vin Shelton)
-
 dnl UnrealIRCd might not be strict-aliasing safe at this time
-case "`$CC -v --help 2>&1`" in
-	*-fstrict-aliasing* ) CFLAGS="$CFLAGS -fno-strict-aliasing" ;;
-esac
+AC_CACHE_CHECK(if the compiler has a working -fno-strict-aliasing, ac_cv_nsa, [
+	save_cflags="$CFLAGS"
+	CFLAGS="$CFLAGS -fno-strict-aliasing"
+	AC_TRY_COMPILE(,, ac_cv_nsa="yes", ac_cv_nsa="no")
+	CFLAGS="$save_cflags"
+])
+if test "$ac_cv_nsa" = "yes"; then
+CFLAGS="$CFLAGS -fno-strict-aliasing"
+fi
 
 dnl Pointer signedness warnings are really a pain and 99.9% of the time
 dnl they are of absolutely no use whatsoever. IMO the person who decided
 dnl to enable this without -Wall should be shot on sight.
-case "`$CC -v --help 2>&1`" in
-	*-Wpointer-sign* ) CFLAGS="$CFLAGS -Wno-pointer-sign" ;;
-esac
+AC_CACHE_CHECK(if the compiler has a working -Wno-pointer-sign, ac_cv_nps, [
+	save_cflags="$CFLAGS"
+	CFLAGS="$CFLAGS -Wno-pointer-sign"
+	AC_TRY_COMPILE(,, ac_cv_nps="yes", ac_cv_nps="no")
+	CFLAGS="$save_cflags"
+])
+if test "$ac_cv_nps" = "yes"; then
+CFLAGS="$CFLAGS -Wno-pointer-sign"
+fi
+
+dnl This is purely for charsys.c... I like it so we can easily read
+dnl this for non-utf8. We can remove it once we ditch non-utf8 some day
+dnl of course, or decide to ignore me and encode them.
+AC_CACHE_CHECK(if the compiler has a working -Wno-invalid-source-encoding, ac_cv_nise, [
+	save_cflags="$CFLAGS"
+	CFLAGS="$CFLAGS -Wno-invalid-source-encoding"
+	AC_TRY_COMPILE(,, ac_cv_nise="yes", ac_cv_nise="no")
+	CFLAGS="$save_cflags"
+])
+if test "$ac_cv_nise" = "yes"; then
+CFLAGS="$CFLAGS -Wno-invalid-source-encoding"
+fi
+
+dnl Pffff..
+AC_CACHE_CHECK(if the compiler has a working -Wno-format-zero-length, ac_cv_nfzl, [
+	save_cflags="$CFLAGS"
+	CFLAGS="$CFLAGS -Wno-format-zero-length"
+	AC_TRY_COMPILE(,, ac_cv_nfzl="yes", ac_cv_nfzl="no")
+	CFLAGS="$save_cflags"
+])
+if test "$ac_cv_nfzl" = "yes"; then
+CFLAGS="$CFLAGS -Wno-format-zero-length"
+fi
+
+dnl More and more and more....
+AC_CACHE_CHECK(if the compiler has a working -Wno-format-truncation, ac_cv_nft, [
+	save_cflags="$CFLAGS"
+	CFLAGS="$CFLAGS -Wno-format-truncation -Werror"
+	AC_TRY_COMPILE(,, ac_cv_nft="yes", ac_cv_nft="no")
+	CFLAGS="$save_cflags"
+])
+if test "$ac_cv_nft" = "yes"; then
+CFLAGS="$CFLAGS -Wno-format-truncation"
+fi
 
 AC_PATH_PROG(RM,rm)
 AC_PATH_PROG(CP,cp)
@@ -189,11 +234,13 @@ AC_DEFINE(STATIC_LINKING)
 ])])
 
 hold_cflags=$CFLAGS
+DYNAMIC_LDFLAGS=""
 CFLAGS="$CFLAGS -Wl,-export-dynamic"
 AC_CACHE_CHECK(if we need the -export-dynamic flag, ac_cv_export_dynamic, [
 AC_TRY_LINK(, [int i];, ac_cv_export_dynamic=yes, ac_cv_export_dynamic=no)])
-if test "$ac_cv_export_dynamic" = "no"; then
 CFLAGS=$hold_cflags
+if test "$ac_cv_export_dynamic" = "yes"; then
+	DYNAMIC_LDFLAGS="-Wl,-export-dynamic"
 fi
 
 AC_CACHE_CHECK(for compiler option to produce PIC,ac_cv_pic,[
@@ -234,7 +281,7 @@ if test "$ac_cv_underscore" = "yes"; then
 	AC_DEFINE([UNDERSCORE], [], [Define if your system prepends an underscore to symbols])
 fi
 
-MODULEFLAGS=$ac_cv_pic
+MODULEFLAGS="$ac_cv_pic $DYNAMIC_LDFLAGS"
 dnl DYNAMIC_LINKING is not meant to be defined in include/setup.h, it's 
 dnl defined in the Makefiles using -D. Having it defined globally will
 dnl only cause braindamage and symbol collisions :-D.
@@ -512,6 +559,7 @@ AC_CHECK_FUNCS(syslog,AC_DEFINE([HAVE_SYSLOG], [], [Define if you have syslog]))
 AC_SUBST(STRTOUL)
 AC_SUBST(CRYPTOLIB)
 AC_SUBST(MODULEFLAGS)
+AC_SUBST(DYNAMIC_LDFLAGS)
 AC_ARG_WITH(nick-history, [AS_HELP_STRING([--with-nick-history=length],[Specify the length of the nickname history])],
 	[AC_DEFINE_UNQUOTED([NICKNAMEHISTORYLENGTH], [$withval], [Set to the nickname history length you want])],
 	[AC_DEFINE([NICKNAMEHISTORYLENGTH], [2000], [Set to the nickname history length you want])])
@@ -599,7 +647,7 @@ AS_IF([test "x$with_privatelibdir" = "xno"],
 AS_IF([test "x$PRIVATELIBDIR" = "x"],
 	[LDFLAGS_PRIVATELIBS=""],
 	[AC_DEFINE_UNQUOTED([PRIVATELIBDIR], ["$PRIVATELIBDIR"], [Define the location of private libraries])
-		LDFLAGS_PRIVATELIBS="-Wl,-rpath=$PRIVATELIBDIR"
+		LDFLAGS_PRIVATELIBS="-Wl,-rpath,$PRIVATELIBDIR"
 		LDFLAGS="$LDFLAGS $LDFLAGS_PRIVATELIBS"
 		export LDFLAGS])
 
@@ -655,11 +703,18 @@ AC_ARG_WITH(system-tre, [AS_HELP_STRING([--with-system-tre], [Use the system tre
 AC_ARG_WITH(system-pcre2, [AS_HELP_STRING([--with-system-pcre2], [Use the system pcre2 package instead of bundled, discovered using pkg-config])], [], [with_system_pcre2=no])
 AC_ARG_WITH(system-cares, [AS_HELP_STRING([--without-system-cares], [Use bundled version instead of system c-ares. Normally autodetected via pkg-config.])], [], [with_system_cares=yes])
 CHECK_SSL
+CHECK_SSL_CTX_SET1_CURVES_LIST
 AC_ARG_ENABLE(dynamic-linking, [AS_HELP_STRING([--disable-dynamic-linking], [Make the IRCd statically link with shared objects rather than dynamically (noone knows if disabling dynamic linking actually does anything or not)])],
 	[enable_dynamic_linking=$enableval], [enable_dynamic_linking="yes"])
 AS_IF([test $enable_dynamic_linking = "yes"],
 	[AC_ENABLE_DYN],
 	[AC_DEFINE([STATIC_LINKING], [], [Link... statically(?) (defining this macro will probably cause the build tofail)])])
+
+AC_ARG_ENABLE([werror],
+  [AS_HELP_STRING([--enable-werror],
+    [Turn compilation warnings into errors (-Werror)])],
+  [ac_cv_werror="$enableval"],
+  [ac_cv_werror="no"])
 
 AC_MSG_CHECKING([if FD_SETSIZE is large enough to allow $ac_fd file descriptors])
 AC_COMPILE_IFELSE([
@@ -863,6 +918,12 @@ AX_PTHREAD()
 CHECK_LIBCURL
 
 UNRLINCDIR="`pwd`/include"
+
+dnl Moved to the very end to ensure it doesn't affect any libs or tests.
+if test "$ac_cv_werror" = "yes" ; then
+	CFLAGS="$CFLAGS -Werror"
+fi
+
 AC_SUBST(UNRLINCDIR)
 
 AC_CONFIG_FILES([Makefile

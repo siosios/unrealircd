@@ -116,6 +116,7 @@ typedef struct _configitem_unknown_ext ConfigItem_unknown_ext;
 typedef struct _configitem_alias ConfigItem_alias;
 typedef struct _configitem_alias_format ConfigItem_alias_format;
 typedef struct _configitem_include ConfigItem_include;
+typedef struct _configitem_blacklist_module ConfigItem_blacklist_module;
 typedef struct _configitem_help ConfigItem_help;
 typedef struct _configitem_offchans ConfigItem_offchans;
 typedef struct liststruct ListStruct;
@@ -713,10 +714,10 @@ struct Server {
 
 
 /* tkl:
- *   TKL_KILL|TKL_GLOBAL 	= Global K:Line (G:Line)
- *   TKL_ZAP|TKL_GLOBAL		= Global Z:Line (ZLINE)
- *   TKL_KILL			= Timed local K:Line
- *   TKL_ZAP			= Local Z:Line
+ *   TKL_KILL|TKL_GLOBAL 	= Global K-Line (GLINELine)
+ *   TKL_ZAP|TKL_GLOBAL		= Global Z-Line (ZLINE)
+ *   TKL_KILL			= Local K-Line
+ *   TKL_ZAP			= Local Z-Line
  */
 #define TKL_KILL	0x0001
 #define TKL_ZAP		0x0002
@@ -747,10 +748,13 @@ struct _spamfilter {
 	TS tkl_duration;
 };
 
+#define TKL_SUBTYPE_NONE	0x0000
+#define TKL_SUBTYPE_SOFT	0x0001 /* (require SASL) */
+
 struct t_kline {
 	aTKline *prev, *next;
 	int type;
-	unsigned short subtype; /* subtype (currently spamfilter only), see SPAMF_* */
+	unsigned short subtype; /* subtype: for spamfilter see SPAMF_*, otherwise TKL_SUBTYPE_* */
 	union {
 		Spamfilter *spamf;
 	} ptr;
@@ -951,12 +955,13 @@ struct _configflag_tld
 	unsigned	rulesptr  : 1;
 };
 
-#define CONF_BAN_NICK		1
-#define CONF_BAN_IP		2
-#define CONF_BAN_SERVER		3
-#define CONF_BAN_USER   	4
-#define CONF_BAN_REALNAME 	5
-#define CONF_BAN_VERSION        6
+#define CONF_BAN_NICK            1
+#define CONF_BAN_IP              2
+#define CONF_BAN_SERVER          3
+#define CONF_BAN_USER            4
+#define CONF_BAN_REALNAME        5
+#define CONF_BAN_VERSION         6
+#define CONF_BAN_UNAUTHENTICATED 7
 
 #define CONF_BAN_TYPE_CONF	0
 #define CONF_BAN_TYPE_AKILL	1
@@ -965,16 +970,29 @@ struct _configflag_tld
 /* Ban actions. These must be ordered by severity (!) */
 #define BAN_ACT_GZLINE		1100
 #define BAN_ACT_GLINE		1000
+#define BAN_ACT_SOFT_GLINE	 950
 #define BAN_ACT_ZLINE		 900
 #define BAN_ACT_KLINE		 800
+#define BAN_ACT_SOFT_KLINE	 850
 #define BAN_ACT_SHUN		 700
+#define BAN_ACT_SOFT_SHUN	 650
 #define BAN_ACT_KILL		 600
+#define BAN_ACT_SOFT_KILL	 550
 #define BAN_ACT_TEMPSHUN	 500
+#define BAN_ACT_SOFT_TEMPSHUN	 450
 #define BAN_ACT_VIRUSCHAN	 400
+#define BAN_ACT_SOFT_VIRUSCHAN	 350
 #define BAN_ACT_DCCBLOCK	 300
+#define BAN_ACT_SOFT_DCCBLOCK	 250
 #define BAN_ACT_BLOCK		 200
+#define BAN_ACT_SOFT_BLOCK	 150
 #define BAN_ACT_WARN		 100
-
+#define BAN_ACT_SOFT_WARN	  50
+#define IsSoftBanAction(x)   ((x == BAN_ACT_SOFT_GLINE) || (x == BAN_ACT_SOFT_KLINE) || \
+                              (x == BAN_ACT_SOFT_SHUN) || (x == BAN_ACT_SOFT_KILL) || \
+                              (x == BAN_ACT_SOFT_TEMPSHUN) || (x == BAN_ACT_SOFT_VIRUSCHAN) || \
+                              (x == BAN_ACT_SOFT_DCCBLOCK) || (x == BAN_ACT_SOFT_BLOCK) || \
+                              (x == BAN_ACT_SOFT_WARN))
 
 #define CRULE_ALL		0
 #define CRULE_AUTO		1
@@ -1001,7 +1019,7 @@ struct _configitem_files {
 };
 
 struct _configitem_admin {
-	ConfigItem *prev, *next;
+	ConfigItem_admin *prev, *next;
 	ConfigFlag flag;
 	char	   *line; 
 };
@@ -1009,7 +1027,7 @@ struct _configitem_admin {
 #define CLASS_OPT_NOFAKELAG		0x1
 
 struct _configitem_class {
-	ConfigItem *prev, *next;
+	ConfigItem_class *prev, *next;
 	ConfigFlag flag;
 	char	   *name;
 	int	   pingfreq, connfreq, maxclients, sendq, recvq, clients;
@@ -1027,7 +1045,7 @@ struct _configflag_allow {
 };
 
 struct _configitem_allow {
-	ConfigItem			*prev, *next;
+	ConfigItem_allow	*prev, *next;
 	ConfigFlag			flag;
 	char				*ip, *hostname, *server;
 	anAuthStruct		*auth;	
@@ -1087,7 +1105,7 @@ struct _configitem_operclass {
 };
 
 struct _configitem_oper {
-	ConfigItem *prev, *next;
+	ConfigItem_oper *prev, *next;
 	ConfigFlag flag;
 	char *name, *snomask;
 	SWhois *swhois;
@@ -1108,6 +1126,8 @@ struct _ssloptions {
 	char *trusted_ca_file;
 	unsigned int protocols;
 	char *ciphers;
+	char *ciphersuites;
+	char *ecdh_curves;
 	long options;
 	int renegotiate_bytes;
 	int renegotiate_timeout;
@@ -1128,7 +1148,7 @@ struct _configitem_drpass {
 };
 
 struct _configitem_ulines {
-	ConfigItem       *prev, *next;
+	ConfigItem_ulines  *prev, *next;
 	ConfigFlag 	 flag;
 	char 		 *servername;
 };
@@ -1137,7 +1157,7 @@ struct _configitem_ulines {
 #define TLD_REMOTE	0x2
 
 struct _configitem_tld {
-	ConfigItem 	*prev, *next;
+	ConfigItem_tld 	*prev, *next;
 	ConfigFlag_tld 	flag;
 	char 		*mask, *channel;
 	char 		*motd_file, *rules_file, *smotd_file;
@@ -1167,7 +1187,7 @@ struct _configitem_sni {
 };
 
 struct _configitem_vhost {
-	ConfigItem 	*prev, *next;
+	ConfigItem_vhost 	*prev, *next;
 	ConfigFlag 	flag;
 	ConfigItem_mask *mask;
 	char		*login, *virthost, *virtuser;
@@ -1176,7 +1196,7 @@ struct _configitem_vhost {
 };
 
 struct _configitem_link {
-	ConfigItem	*prev, *next;
+	ConfigItem_link	*prev, *next;
 	ConfigFlag	flag;
 	/* config options: */
 	char *servername; /**< Name of the server ('link <servername> { }') */
@@ -1205,21 +1225,21 @@ struct _configitem_link {
 };
 
 struct _configitem_except {
-	ConfigItem      *prev, *next;
+	ConfigItem_except      *prev, *next;
 	ConfigFlag_except      flag;
 	int type;
 	char		*mask;
 };
 
 struct _configitem_ban {
-	ConfigItem		*prev, *next;
+	ConfigItem_ban	*prev, *next;
 	ConfigFlag_ban	flag;
 	char			*mask, *reason;
 	unsigned short action;
 };
 
 struct _configitem_deny_dcc {
-	ConfigItem		*prev, *next;
+	ConfigItem_deny_dcc		*prev, *next;
 	ConfigFlag_ban		flag;
 	char			*filename, *reason;
 };
@@ -1231,13 +1251,13 @@ struct _configitem_deny_link {
 };
 
 struct _configitem_deny_version {
-	ConfigItem		*prev, *next;
+	ConfigItem_deny_version	*prev, *next;
 	ConfigFlag		flag;
 	char 			*mask, *version, *flags;
 };
 
 struct _configitem_deny_channel {
-	ConfigItem		*prev, *next;
+	ConfigItem_deny_channel		*prev, *next;
 	ConfigFlag		flag;
 	char			*channel, *reason, *redirect, *class;
 	unsigned char	warn;
@@ -1245,20 +1265,20 @@ struct _configitem_deny_channel {
 };
 
 struct _configitem_allow_channel {
-	ConfigItem		*prev, *next;
+	ConfigItem_allow_channel		*prev, *next;
 	ConfigFlag		flag;
 	char			*channel, *class;
 	ConfigItem_mask *mask;
 };
 
 struct _configitem_allow_dcc {
-	ConfigItem		*prev, *next;
+	ConfigItem_allow_dcc		*prev, *next;
 	ConfigFlag_ban	flag;
 	char			*filename;
 };
 
 struct _configitem_log {
-	ConfigItem *prev, *next;
+	ConfigItem_log *prev, *next;
 	ConfigFlag flag;
 	char *file;
 	long maxsize;
@@ -1267,13 +1287,13 @@ struct _configitem_log {
 };
 
 struct _configitem_unknown {
-	ConfigItem *prev, *next;
+	ConfigItem_unknown *prev, *next;
 	ConfigFlag flag;
 	ConfigEntry *ce;
 };
 
 struct _configitem_unknown_ext {
-	ConfigItem *prev, *next;
+	ConfigItem_unknown_ext *prev, *next;
 	ConfigFlag flag;
 	char *ce_varname, *ce_vardata;
 	ConfigFile      *ce_fileptr;
@@ -1287,7 +1307,7 @@ typedef enum {
 } AliasType;
 
 struct _configitem_alias {
-	ConfigItem *prev, *next;
+	ConfigItem_alias *prev, *next;
 	ConfigFlag flag;
 	ConfigItem_alias_format *format;
 	char *alias, *nick;
@@ -1296,7 +1316,7 @@ struct _configitem_alias {
 };
 
 struct _configitem_alias_format {
-	ConfigItem *prev, *next;
+	ConfigItem_alias_format *prev, *next;
 	ConfigFlag flag;
 	char *nick;
 	AliasType type;
@@ -1322,7 +1342,7 @@ struct _configitem_alias_format {
 #define INCLUDE_USED       0x8
 	
 struct _configitem_include {
-	ConfigItem *prev, *next;
+	ConfigItem_include *prev, *next;
 	ConfigFlag_ban flag;
 	char *file;
 #ifdef USE_LIBCURL
@@ -1333,15 +1353,20 @@ struct _configitem_include {
 	int included_from_line;
 };
 
+struct _configitem_blacklist_module {
+	ConfigItem_blacklist_module *prev, *next;
+	char *name;
+};
+
 struct _configitem_help {
-	ConfigItem *prev, *next;
+	ConfigItem_help *prev, *next;
 	ConfigFlag flag;
 	char *command;
 	aMotdLine *text;
 };
 
 struct _configitem_offchans {
-	ConfigItem *prev, *next;
+	ConfigItem_offchans *prev, *next;
 	char chname[CHANNELLEN+1];
 	char *topic;
 };
@@ -1659,8 +1684,7 @@ extern MODVAR char *gnulicense[];
 #define isexcept void
 
 #include "ssl.h"
-#define EVENT_HASHES EVENT_DRUGS
-#include "events.h"
+
 struct Command {
 	aCommand		*prev, *next;
 	char 			*cmd;
@@ -1681,6 +1705,7 @@ struct Command {
 
 struct _cmdoverride {
 	Cmdoverride		*prev, *next;
+	int			priority;
 	Module			*owner;
 	aCommand		*command;
 	int			(*func)();
@@ -1763,6 +1788,8 @@ typedef enum {
 	PLAINTEXT_POLICY_WARN=2,
 	PLAINTEXT_POLICY_DENY=3
 } PlaintextPolicy;
+
+#define NO_EXIT_CLIENT	99
 
 #endif /* __struct_include__ */
 

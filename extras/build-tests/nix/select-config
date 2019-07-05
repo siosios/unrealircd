@@ -4,10 +4,26 @@
 # It is not meant to be used by end-users
 #
 
+function build_ssl {
+	DIR="$2"
+	URL="$1/$2.tar.gz"
+	savewd="$PWD"
+	cd ~
+	wget "$URL" || exit 1
+	tar xzvf $DIR.tar.gz
+	cd "$DIR"
+	(./configure --prefix=$HOME/ssl || ./config --prefix=$HOME/ssl -fPIC) || exit 1
+	(make -j2 && make install) || exit 1
+	cd "$savewd"
+	echo "SSLDIR=$HOME/ssl" >>config.settings
+}
+
 if [ ! -d extras ]; then
 	echo "This tool is supposed to be run from the source root, so ~/unrealircd-4.0.x or similar"
 	exit 1
 fi
+
+set -x
 
 # Take default settings as a starter..
 cp extras/build-tests/nix/configs/default ./config.settings
@@ -16,10 +32,14 @@ cp extras/build-tests/nix/configs/default ./config.settings
 # Also for our FreeBSD machine we have to uninstall some stuff since a clean
 # environment is not guaranteed...
 if [ "$OSTYPE" = "linux-gnu" ]; then
+	sudo apt-get -qq update
 	sudo apt-get install libtool -qq
 elif [[ "$OSTYPE" == "freebsd"* ]]; then
 	sudo pkg install -y libtool
 	sudo pkg remove -y c-ares
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+	brew update
+	brew install openssl
 else
 	echo "OS not correctly detected ($OSTYPE). Aborting."
 	exit 1
@@ -37,6 +57,8 @@ do
 			sudo apt-get install libc-ares-dev -qq
 		elif [[ "$OSTYPE" == "freebsd"* ]]; then
 			sudo pkg install -y c-ares
+		elif [[ "$OSTYPE" == "darwin"* ]]; then
+			brew install c-ares
 		fi
 	elif [ "$1" = "system-curl" ]; then
 		echo 'REMOTEINC=1' >>config.settings
@@ -46,18 +68,41 @@ do
 		elif [[ "$OSTYPE" == "freebsd"* ]]; then
 			sudo pkg install -y curl
 			echo 'CURLDIR=/usr/local' >>config.settings
+		elif [[ "$OSTYPE" == "darwin"* ]]; then
+			brew install c-ares curl
+			echo 'CURLDIR=/usr/local/opt/curl' >>config.settings
 		fi
 	elif [ "$1" = "local-curl" ]; then
 		if [ "$OSTYPE" = "linux-gnu" ]; then
 			sudo apt-get remove libcurl4-openssl-dev libcurl3-gnutls libcurl3 -qq
 		elif [[ "$OSTYPE" == "freebsd"* ]]; then
 			sudo pkg remove -y curl #NOTE: unfortunately this also removes 'git' :D
+		elif [[ "$OSTYPE" == "darwin"* ]]; then
+			echo "No need to remove curl since it's not installed. Or at least I hope so..."
 		fi
 		echo 'REMOTEINC=1' >>config.settings
 		echo "CURLDIR=`pwd`/extras/curl" >>config.settings
+	elif [ "$1" = "libressl-25" ]; then
+		build_ssl https://ftp.openbsd.org/pub/OpenBSD/LibreSSL libressl-2.5.5
+	elif [ "$1" = "libressl-26" ]; then
+		build_ssl https://ftp.openbsd.org/pub/OpenBSD/LibreSSL libressl-2.6.4
+	elif [ "$1" = "libressl-27" ]; then
+		build_ssl https://ftp.openbsd.org/pub/OpenBSD/LibreSSL libressl-2.7.2
+	elif [ "$1" = "openssl-102" ]; then
+		build_ssl https://www.openssl.org/source openssl-1.0.2o
+	elif [ "$1" = "openssl-110" ]; then
+		build_ssl https://www.openssl.org/source openssl-1.1.0h
+	elif [ "$1" = "openssl-111" ]; then
+		build_ssl https://www.openssl.org/source openssl-1.1.1-pre7
 	else
 		echo "Unknown option $1"
 		exit 1
 	fi
 	shift
 done
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	echo "NOTE: Not building with -Werror for now on macOS..."
+else
+	echo 'EXTRAPARA="--enable-werror"' >>config.settings
+fi

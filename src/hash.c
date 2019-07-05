@@ -172,9 +172,8 @@ void clear_client_hash_table(void)
 
 void clear_channel_hash_table(void)
 {
-	memset((char *)channelTable, '\0', sizeof(aHashEntry) * CH_MAX);
+	memset(channelTable, 0, sizeof(channelTable));
 }
-
 
 /*
  * add_to_client_hash_table
@@ -456,7 +455,7 @@ int   add_to_watch_hash_table(char *nick, aClient *cptr, int awaynotify)
 	
 	/* If found NULL (no header for this nick), make one... */
 	if (!anptr) {
-		anptr = (aWatch *)MyMalloc(sizeof(aWatch)+strlen(nick));
+		anptr = (aWatch *)MyMallocEx(sizeof(aWatch)+strlen(nick));
 		anptr->lasttime = timeofday;
 		strcpy(anptr->nick, nick);
 		

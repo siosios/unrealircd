@@ -7,14 +7,20 @@ set -e
 set -x
 
 if [ "$1" != "" ]; then
-	BUILDCONFIG="$1"
+	BUILDCONFIG="$*"
 fi
 
 export MAKE="make -j3"
 export CPPFLAGS="-DFAKELAG_CONFIGURABLE"
 
 extras/build-tests/nix/select-config $BUILDCONFIG
-./Config -quick
+# Read config.settings, this makes a couple of variables available to us.
+. ./config.settings
+if [ "$SSLDIR" != "" ]; then
+	# In case we build local openssl/libressl
+	export LD_LIBRARY_PATH="$SSLDIR/lib"
+fi
+./Config -quick || (tail -n 5000 config.log; echo '*** now tre:'; tail -n 5000 extras/tre-0.8.0-git/config.log; echo '** end of tre config.log **'; exit 1)
 $MAKE
 yes ''|make pem
 make install
@@ -25,11 +31,23 @@ echo "***********************************************"
 echo "UnrealIRCd build & install successful."
 echo "***********************************************"
 
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	otool -L ~/unrealircd/bin/unrealircd
+else
+	ldd ~/unrealircd/bin/unrealircd
+fi
+
 if [ "$BUILDCONFIG" = "local-curl" ]; then
 	# We broke the system significantly earlier that build tests
 	# won't work (eg: 'git' is uninstallable). Don't bother
 	# running the tests. I don't expect a 'local-curl' specific
 	# bug anyway.
+	exit 0
+fi
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+	# 'rake' doesn't work. have to figure that one out..
+	echo "Not running test on OS X for now"
 	exit 0
 fi
 

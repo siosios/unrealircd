@@ -313,10 +313,26 @@
  */
 #undef EXPERIMENTAL
 
-/* Default SSL/TLS cipherlist.
+/* Default SSL/TLS cipherlist (except for TLS1.3, see further down).
  * This can be changed via set::ssl::options::ciphers in the config file.
  */
 #define UNREALIRCD_DEFAULT_CIPHERS "TLS13-CHACHA20-POLY1305-SHA256 TLS13-AES-128-GCM-SHA256 TLS13-AES-256-GCM-SHA384 EECDH+CHACHA20 EECDH+AESGCM EECDH+AES AES128-GCM-SHA256 AES256-GCM-SHA384 AES128-SHA256 AES256-SHA256 AES128-SHA AES256-SHA"
+
+/* Default TLS 1.3 ciphersuites.
+ * This can be changed via set::ssl::options::ciphersuites in the config file.
+ */
+#define UNREALIRCD_DEFAULT_CIPHERSUITES "TLS_CHACHA20_POLY1305_SHA256:TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_AES_128_CCM_8_SHA256:TLS_AES_128_CCM_SHA256"
+
+/* Default SSL/TLS curves for ECDH(E)
+ * This can be changed via set::ssl::options::ecdh-curve in the config file.
+ * NOTE: This requires openssl 1.0.2 or newer, otherwise these defaults
+ *       are not applied, due to the missing openssl API call.
+ */
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+#define UNREALIRCD_DEFAULT_ECDH_CURVES "X25519:secp521r1:secp384r1:prime256v1"
+#else
+#define UNREALIRCD_DEFAULT_ECDH_CURVES "secp521r1:secp384r1:prime256v1"
+#endif
 
 /* ------------------------- END CONFIGURATION SECTION -------------------- */
 #define MOTD MPATH

@@ -3,6 +3,186 @@ See doc/RELEASE-NOTES for the latest release notes.
 This file (doc/RELEASE-NOTES.old) contains the release notes
 of OLDER releases for historical purposes.
 
+==[ CHANGES BETWEEN 4.0.17 AND 4.0.18 ]==
+
+Enhancements:
+* Support for checking IPv6 addresses in DNS blacklists
+* For SSL/TLS we now set the default ECDH(E) curves to be
+  X25519:secp521r1:secp384r1:prime256v1 if using a recent version of
+  OpenSSL/LibreSSL. This can be overridden via set::ssl::ecdh-curve.
+* The blacklist module now checks WEBIRC users as well.
+* You can now require SASL for all clients via the allow block via:
+  allow { ip *; class clients; maxperip 2; options { sasl; }; };
+  This can be useful for a special sasl-only server which, for example,
+  only permits proxies and tor clients. In a future release the feature
+  will be made more flexible so it can be used for other purposes
+  as well.
+
+Major issues fixed:
+* A number of (potential) security issues were fixed:
+  * Memory leaks: this could allow an attacker to slowly consume all
+    available memory and ultimately cause UnrealIRCd to crash.
+  * Out of bounds read: in practice this does not seem to be
+    exploitable due to the many restrictions that are imposed.
+* Compile issues on macOS
+* Bug in blacklist module which could have caused false negatives,
+  allowing bad guys in which should have been denied.
+* The new optional feature 'set::cloak-method ip' caused identical cloaks
+
+Minor issues fixed:
+* When using '/REHASH -ssl' or './unrealircd reloadtls' it did not reload
+  the SSL certificate/key if you were using ssl-options in listen, sni or
+  link blocks. In short: it only reloaded the ones from set::ssl until now.
+* m_ircops sent a conflicting numeric, confusing some clients.
+* Starting UnrealIRCd through a non-interactive(!) ssh session could cause
+  the ssh session to hang.
+* An upgrade issue with non-system cURL causing compile problems.
+
+Other changes:
+* The built-in time synchronization feature is now disabled by default.
+  TimeSynch was added back in 2006 when lots of operating systems did not
+  ship with time synchronization turned on by default. Since incorrect time
+  severely breaks IRC networks this was a major problem. Nowadays this is
+  completely different with most Linux distro's, OS X, Windows, etc. doing
+  time synchronization out of the box. Since UnrealIRCd's implementation is
+  less precise and lacks authentication it's best left over to the system.
+  You can still re-enable timesynch via:
+  set { timesynch { enabled yes; }; };
+  .. but you should really use NTP or similar for system-wide time
+  synchronization instead.
+* For developers there's now the --with-werror compile option which will
+  add -Werror.
+* Added a lot more Travis-CI tests: various LibreSSL/OpenSSL versions
+  and also test macOS. This to prevent us from releasing broken stuff.
+* Various code cleanups to get rid of lots of needless casts and to
+  eliminate compiler warnings.
+* Just as a reminder (this change was already in version 4.0.17):
+  UnrealIRCd will no longer give user mode +z to users on WEBIRC
+  gateways using SSL/TLS IRC, unless the WEBIRC gateway gives us
+  some assurance that the client<->webirc gateway connection is
+  also secure (eg: https).
+  This is the regular WEBIRC format:
+  WEBIRC password gateway hostname ip
+  This indicates a secure client connection (NEW):
+  WEBIRC password gateway hostname ip :secure
+  Naturally, WEBIRC gateways MUST NOT send the "secure" option if
+  the client is using http or some other insecure protocol.
+
+Module coders:
+* HOOKTYPE_CHANNEL_SYNCED prototype changed, the 'merge' and 'removetheirs'
+  is now no longer an 'unsigned short' but an 'int' instead.
+* HOOKTYPE_MODE_DEOP prototype changed, the 'modechar' is now no longer
+  a 'char' but an 'int' instead.
+* In addition to safestrdup() there's now also safestrldup() which allows
+  you to specify a maximum allocated length (so including the nul byte).
+  This is used in m_pass.c and m_topic.c.
+* New hook HOOKTYPE_CAN_BYPASS_CHANNEL_MESSAGE_RESTRICTION
+  https://www.unrealircd.org/docs/Dev:Hook_API#HOOKTYPE_CAN_BYPASS_CHANNEL_MESSAGE_RESTRICTION
+
+Future versions:
+* We intend to change the default plaintext oper policy from 'warn' to 'deny'
+  later this year. This will deny /OPER when used from a non-SSL connection.
+  For security, IRC Operators should really use SSL/TLS!
+
+==[ CHANGES BETWEEN 4.0.16.1 AND 4.0.17 ]==
+
+Enhancements:
+* Two optional modules. These are not loaded by default. To use them,
+  include modules.optional.conf, or add these loadmodule lines:
+  loadmodule "extbans/timedban";
+  loadmodule "extbans/msgbypass";
+  * Timed bans: ~t:duration:mask
+    These are bans that are automatically removed by the server.
+    The duration is in minutes and the mask can be any ban mask.
+    Some examples:
+    * A 5 minute ban on a host:
+      +b ~t:5:*!*@host
+    * A 5 minute quiet ban on a host (unable to speak):
+      +b ~t:5:~q:*!*@host
+    * An invite exception for 1440m/24hrs
+      +I ~t:1440:*!*@host
+    * A temporary exempt ban for a services account
+      +e ~t:1440:~a:Account
+    * Allows someone to speak through +m for the next 24hrs:
+      +e ~t:1440:~m:moderated:*!*@host
+    * And any other crazy ideas you can come up with...
+  * New ban exception ~m:type:mask which allows bypassing of message
+    restrictions. Valid types are: 'external' (bypass +n),
+    moderated (bypass +m/+M), 'censor' (bypass +G),
+    'color' (bypass +S/+c) and 'notice' (bypass +T).
+    Some examples:
+    * Let LAN users bypass +m: +e ~m:moderated:*!*@192.168.*
+    * Let ops in #otherchan bypass +m: +e ~m:moderated:~c:@#otherchan
+    * Make GitHub commit bot bypass +n: +e ~m:external:*!*@ipmask
+    * Allow a services account to use color: +e ~m:color:~a:ColorBot
+* Timedban support in +f [5t#b2]:10 (set 2 minute ban on text flood).
+  This is only available if the previously mentioned extbans/timedban
+  module is loaded.
+* Added experimental UTF8 support in set::allowed-nickchars
+  See https://www.unrealircd.org/docs/Nick_Character_Sets
+  Example: set { allowed-nickchars { latin-utf8; }; };
+  Important remarks:
+  * All your servers must be on UnrealIRCd 4.0.17 (or later)
+  * Most(?) services do not support this, so users using UTF8 nicknames
+    won't be able to register at NickServ.
+  * In set::allowed-nickchars you must either choose an utf8 language
+    or a non-utf8 character set. You cannot combine the two.
+  * You also cannot combine multiple scripts/alphabets, such as:
+    latin, greek, cyrillic and hebrew. You must choose one.
+  * If you are already using set::allowed-nickchars on your network
+    (eg: 'latin1') then be careful when migrating (to eg: 'latin-utf8'):
+    * Your clients may still assume non-UTF8
+    * If users registered nicks with accents or other special characters
+      at NickServ then they may not be able to access their account
+      after the migration to UTF8.
+  * There is no CASEMAPPING or "visually identical character"-checking.
+    Just like in the old (non-utf8) charsys this means there is no
+    lower/uppercase checking for allowed-nickchars nicks. So a nick with
+    "O with accent" can be online at the same time as "o with accent".
+    They are treated as two different users.
+    The identical character looking issue is particular noticeable in
+    cyrillic script where for example cyrillic "A" looks identical to
+    latin "A" and thus can be used to impersonate a user.
+    Improved CASEMAPPING and "visually similar character"-checking is
+    part of ongoing research at the IRCv3 working group.
+* Ability to customize the reject connection messages:
+  set {
+     reject-message {
+          password-mismatch "Password mismatch";
+          too-many-connections "Too many connections from your IP";
+          server-full "This server is full.";
+          unauthorized "You are not authorized to connect to this server";
+      };
+  };
+* Added optional AppArmor profile in extras/security/apparmor/unrealircd
+  See https://www.unrealircd.org/docs/Using_AppArmor_with_UnrealIRCd
+
+Major issues fixed:
+* Crash when using OperOverride (*NIX only)
+* Crash if linking anope with the 'unreal' module from a non-localhost
+  SSL connection. This is rarely done but also acts as a reminder that
+  people should really use the 'unreal4' module in anope (2.0.3+).
+
+Minor issues fixed:
+* set::restrict-extendedbans was not effective for stacked bans
+* linking if only using link::outgoing caused a 'server name mismatch'
+
+Other:
+* UnrealIRCd will no longer give user mode +z to users on WEBIRC
+  gateways using SSL/TLS IRC, unless the WEBIRC gateway gives us
+  some assurance that the client<->webirc gateway connection is
+  also secure (eg: https).
+  This is the regular WEBIRC format:
+  WEBIRC password gateway hostname ip
+  This indicates a secure client connection (NEW):
+  WEBIRC password gateway hostname ip :secure
+  Naturally, WEBIRC gateways MUST NOT send the "secure" option if
+  the client is using http or some other insecure protocol.
+
+Module coders:
+* New hook HOOKTYPE_CAN_BYPASS_CHANNEL_MESSAGE_RESTRICTION
+  https://www.unrealircd.org/docs/Dev:Hook_API#HOOKTYPE_CAN_BYPASS_CHANNEL_MESSAGE_RESTRICTION
+
 ==[ CHANGES BETWEEN 4.0.16 AND 4.0.16.1 ]==
 An interim release with a couple of backported fixes:
 * Fix hang in (outgoing) server linking

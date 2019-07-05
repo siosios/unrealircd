@@ -418,7 +418,7 @@ EVENT(try_connections)
 	int  confrq;
 	ConfigItem_class *class;
 
-	for (aconf = conf_link; aconf; aconf = (ConfigItem_link *) aconf->next)
+	for (aconf = conf_link; aconf; aconf = aconf->next)
 	{
 		/* We're only interested in autoconnect blocks that are valid (and ignore temporary link blocks) */
 		if (!(aconf->outgoing.options & CONNECT_AUTO) || !aconf->outgoing.hostname || (aconf->flag.temporary == 1))
@@ -544,6 +544,13 @@ EVENT(check_unknowns)
 	{
 		if (cptr->local->firsttime && ((TStime() - cptr->local->firsttime) > iConf.handshake_timeout))
 		{
+			if (cptr->serv && *cptr->serv->by)
+			{
+				/* If this is a handshake timeout to an outgoing server then notify ops & log it */
+				sendto_ops_and_log("Connection handshake timeout while connecting to server '%s' (%s)",
+					cptr->name, cptr->ip?cptr->ip:"<unknown ip>");
+			}
+
 			(void)exit_client(cptr, cptr, &me, "Registration Timeout");
 			continue;
 		}
@@ -581,7 +588,7 @@ int check_ping(aClient *cptr)
 			IsHandshake(cptr)
 			|| IsSSLConnectHandshake(cptr)
 			) {
-			sendto_realops
+			sendto_ops_and_log
 				("No response from %s, closing link",
 				get_client_name(cptr, FALSE));
 			sendto_server(&me, 0, 0,
@@ -898,7 +905,7 @@ void fix_timers(void)
 	Debug((DEBUG_DEBUG, "fix_timers(): removed %d throttling item(s)", cnt));
 
 	/* Make sure autoconnect for servers still works (lnk->hold) */
-	for (lnk = conf_link; lnk; lnk = (ConfigItem_link *) lnk->next)
+	for (lnk = conf_link; lnk; lnk = lnk->next)
 	{
 		int t = lnk->class ? lnk->class->connfreq : 90;
 
@@ -1231,7 +1238,11 @@ int InitUnrealIRCd(int argc, char *argv[])
 			  exit(0);
 #endif
 		  case 'U':
-		      chdir(CONFDIR);
+		      if (chdir(CONFDIR) < 0)
+		      {
+		      	fprintf(stderr, "Unable to change to '%s' directory\n", CONFDIR);
+		      	exit(1);
+		      }
 		      update_conf();
 		      exit(0);
 		  case 'R':
@@ -1322,8 +1333,7 @@ int InitUnrealIRCd(int argc, char *argv[])
 	/*
 	 * Add default class
 	 */
-	default_class =
-	    (ConfigItem_class *) MyMallocEx(sizeof(ConfigItem_class));
+	default_class = MyMallocEx(sizeof(ConfigItem_class));
 	default_class->flag.permanent = 1;
 	default_class->pingfreq = 120;
 	default_class->maxclients = 100;
@@ -1408,9 +1418,22 @@ int InitUnrealIRCd(int argc, char *argv[])
 #if !defined(_AMIGA) && !defined(_WIN32) && !defined(NO_FORKING)
 	if (!(bootopt & BOOT_NOFORK))
 	{
-		if (fork())
+		pid_t p;
+		p = fork();
+		if (p < 0)
+		{
+			fprintf(stderr, "Could not create background job. Call to fork() failed: %s\n",
+				strerror(errno));
+			exit(-1);
+		}
+		if (p > 0)
+		{
+			/* Background job created and we are the parent. We can terminate. */
 			exit(0);
-    fd_fork();
+		}
+		/* Background process (child) continues below... */
+		close_std_descriptors();
+		fd_fork();
 		loop.ircd_forked = 1;
 	}
 #endif
@@ -1611,7 +1634,8 @@ static void open_debugfile(void)
 		/*(void)printf("isatty = %d ttyname = %#x\n",
 		    isatty(2), (u_int)ttyname(2)); */
 		if (!(bootopt & BOOT_TTY)) {	/* leave debugging output on fd 2 */
-			(void)truncate(LOGFILE, 0);
+			if (truncate(LOGFILE, 0) < 0)
+				fprintf(stderr, "WARNING: could not truncate log file '%s'\n", LOGFILE);
 			if ((fd = open(LOGFILE, O_WRONLY | O_CREAT, 0600)) < 0)
 				if ((fd = open("/dev/null", O_WRONLY)) < 0)
 					exit(-1);

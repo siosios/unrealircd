@@ -489,10 +489,10 @@ typedef struct _ModuleObject {
 #define MODERR_INVALID 3
 #define MODERR_NOTFOUND 4
 
-unsigned int ModuleGetError(Module *module);
-const char *ModuleGetErrorStr(Module *module);
-unsigned int ModuleGetOptions(Module *module);
-unsigned int ModuleSetOptions(Module *module, unsigned int options, int action);
+extern unsigned int ModuleGetError(Module *module);
+extern const char *ModuleGetErrorStr(Module *module);
+extern unsigned int ModuleGetOptions(Module *module);
+extern unsigned int ModuleSetOptions(Module *module, unsigned int options, int action);
 
 struct _Module
 {
@@ -560,8 +560,6 @@ struct _eventinfo {
 };
 
 
-/* Huh? Why are those not marked as extern?? -- Syzop */
-
 extern MODVAR Hook		*Hooks[MAXHOOKTYPES];
 extern MODVAR Hooktype		Hooktypes[MAXCUSTOMHOOKS];
 extern MODVAR Callback *Callbacks[MAXCALLBACKS], *RCallbacks[MAXCALLBACKS];
@@ -569,31 +567,32 @@ extern MODVAR Efunction *Efunctions[MAXEFUNCTIONS];
 extern MODVAR ClientCapability *clicaps;
 
 #define EventAdd(name, every, howmany, event, data) EventAddEx(NULL, name, every, howmany, event, data)
-Event   *EventAddEx(Module *, char *name, long every, long howmany,
+extern Event   *EventAddEx(Module *, char *name, long every, long howmany,
                   vFP event, void *data);
-Event   *EventDel(Event *event);
-Event   *EventMarkDel(Event *event);
-Event   *EventFind(char *name);
-int     EventMod(Event *event, EventInfo *mods);
-void    DoEvents(void);
-void    EventStatus(aClient *sptr);
-void    SetupEvents(void);
-void	LockEventSystem(void);
-void	UnlockEventSystem(void);
+extern Event   *EventDel(Event *event);
+extern Event   *EventMarkDel(Event *event);
+extern Event   *EventFind(char *name);
+extern int     EventMod(Event *event, EventInfo *mods);
+extern void    DoEvents(void);
+extern void    EventStatus(aClient *sptr);
+extern void    SetupEvents(void);
+extern void	LockEventSystem(void);
+extern void	UnlockEventSystem(void);
 
 
-void    Module_Init(void);
-char    *Module_Create(char *path);
-void    Init_all_testing_modules(void);
-void    Unload_all_loaded_modules(void);
-void    Unload_all_testing_modules(void);
-int     Module_Unload(char *name);
-vFP     Module_Sym(char *name);
-vFP     Module_SymX(char *name, Module **mptr);
-int	Module_free(Module *mod);
+extern void    Module_Init(void);
+extern char    *Module_Create(char *path);
+extern char    *Module_TransformPath(char *path_);
+extern void    Init_all_testing_modules(void);
+extern void    Unload_all_loaded_modules(void);
+extern void    Unload_all_testing_modules(void);
+extern int     Module_Unload(char *name);
+extern vFP     Module_Sym(char *name);
+extern vFP     Module_SymX(char *name, Module **mptr);
+extern int	Module_free(Module *mod);
 
 #ifdef __OpenBSD__
-void *obsd_dlsym(void *handle, char *symbol);
+extern void *obsd_dlsym(void *handle, char *symbol);
 #endif
 
 extern Versionflag *VersionflagAdd(Module *module, char flag);
@@ -699,18 +698,19 @@ extern Callback	*CallbackDel(Callback *cb);
 extern Efunction	*EfunctionAddMain(Module *module, int eftype, int (*intfunc)(), void (*voidfunc)(), void *(*pvoidfunc)(), char *(*pcharfunc)());
 extern Efunction	*EfunctionDel(Efunction *cb);
 
-Command *CommandAdd(Module *module, char *cmd, int (*func)(aClient *cptr, aClient *sptr, int parc, char *parv[]), unsigned char params, int flags);
-void CommandDel(Command *command);
-int CommandExists(char *name);
-Cmdoverride *CmdoverrideAdd(Module *module, char *cmd, int (*func)(Cmdoverride *ovr, aClient *cptr, aClient *sptr, int parc, char *parv[]));
-void CmdoverrideDel(Cmdoverride *ovr);
-int CallCmdoverride(Cmdoverride *ovr, aClient *cptr, aClient *sptr, int parc, char *parv[]);
+extern Command *CommandAdd(Module *module, char *cmd, int (*func)(aClient *cptr, aClient *sptr, int parc, char *parv[]), unsigned char params, int flags);
+extern void CommandDel(Command *command);
+extern int CommandExists(char *name);
+extern Cmdoverride *CmdoverrideAdd(Module *module, char *cmd, int (*func)(Cmdoverride *ovr, aClient *cptr, aClient *sptr, int parc, char *parv[]));
+extern Cmdoverride *CmdoverrideAddEx(Module *module, char *name, int priority, int (*func)(Cmdoverride *ovr, aClient *cptr, aClient *sptr, int parc, char *parv[]));
+extern void CmdoverrideDel(Cmdoverride *ovr);
+extern int CallCmdoverride(Cmdoverride *ovr, aClient *cptr, aClient *sptr, int parc, char *parv[]);
 
 extern void moddata_free_client(aClient *acptr);
 extern void moddata_free_channel(aChannel *chptr);
 extern void moddata_free_member(Member *m);
 extern void moddata_free_membership(Membership *m);
-ModDataInfo *findmoddata_byname(char *name, ModDataType type);
+extern ModDataInfo *findmoddata_byname(char *name, ModDataType type);
 extern int moddata_client_set(aClient *acptr, char *varname, char *value);
 extern char *moddata_client_get(aClient *acptr, char *varname);
 
@@ -890,12 +890,12 @@ int hooktype_view_topic_outside_channel(aClient *sptr, aChannel *chptr);
 int hooktype_chan_permit_nick_change(aClient *sptr, aChannel *chptr);
 int hooktype_is_channel_secure(aChannel *chptr);
 int hooktype_can_send_secure(aClient *sptr, aChannel *chptr);
-void hooktype_channel_synced(aChannel *chptr, unsigned short merge, unsigned short removetheirs, unsigned short nomode);
+void hooktype_channel_synced(aChannel *chptr, int merge, int removetheirs, int nomode);
 int hooktype_can_sajoin(aClient *target, aChannel *chptr, aClient *sptr);
 int hooktype_whois(aClient *sptr, aClient *target);
 int hooktype_check_init(aClient *cptr, char *sockname, size_t size);
 int hooktype_who_status(aClient *sptr, aClient *target, aChannel *chptr, Member *member, char *status, int cansee);
-int hooktype_mode_deop(aClient *sptr, aClient *victim, aChannel *chptr, u_int what, char modechar, long my_access, char **badmode);
+int hooktype_mode_deop(aClient *sptr, aClient *victim, aChannel *chptr, u_int what, int modechar, long my_access, char **badmode);
 int hooktype_pre_kill(aClient *sptr, aClient *victim, char *killpath);
 int hooktype_see_channel_in_whois(aClient *sptr, aClient *target, aChannel *chptr);
 int hooktype_dcc_denied(aClient *sptr, aClient *target, char *realfile, char *displayfile, ConfigItem_deny_dcc *denydcc);
@@ -1011,6 +1011,7 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
 #define CALLBACKTYPE_CLOAK 1
 #define CALLBACKTYPE_CLOAKKEYCSUM 2
 #define CALLBACKTYPE_CLOAK_EX 3
+#define CALLBACKTYPE_BLACKLIST_CHECK 4
 
 /* Efunction types */
 #define EFUNC_DO_JOIN       				1
@@ -1090,6 +1091,7 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
 #define CONFIG_ALLOW 6
 #define CONFIG_CLOAKKEYS 7
 #define CONFIG_SET_ANTI_FLOOD 8
+#define CONFIG_REQUIRE 9
 
 #define MOD_HEADER(name) Mod_Header
 #define MOD_TEST(name) DLLFUNC int Mod_Test(ModuleInfo *modinfo)

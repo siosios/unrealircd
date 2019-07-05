@@ -88,17 +88,15 @@ char *find_or_add(char *name)
 	 */
 	if ((ptr = scache_hash[hash_index]))
 	{
-		newptr = scache_hash[hash_index] =
-		    (SCACHE *) MyMalloc(sizeof(SCACHE));
-		strlcpy(newptr->name, name, HOSTLEN);
+		newptr = scache_hash[hash_index] = MyMallocEx(sizeof(SCACHE));
+		strlcpy(newptr->name, name, sizeof(newptr->name));
 		newptr->next = ptr;
 		return (newptr->name);
 	}
 	else
 	{
-		ptr = scache_hash[hash_index] =
-		    (SCACHE *) MyMalloc(sizeof(SCACHE));
-		strlcpy(ptr->name, name, HOSTLEN);
+		ptr = scache_hash[hash_index] = MyMallocEx(sizeof(SCACHE));
+		strlcpy(ptr->name, name, sizeof(newptr->name));
 		ptr->next = (SCACHE *) NULL;
 		return (ptr->name);
 	}
@@ -141,27 +139,4 @@ void count_scache(int *number_servers_cached, u_long *mem_servers_cached)
 			scache_ptr = scache_ptr->next;
 		}
 	}
-}
-/*
- * list all server names in scache very verbose 
- */
-
-void list_scache(aClient *sptr)
-{
-	int  hash_index;
-	SCACHE *ptr;
-
-	for (hash_index = 0; hash_index < SCACHE_HASH_SIZE; hash_index++)
-	{
-		ptr = scache_hash[hash_index];
-		while (ptr)
-		{
-			if (ptr->name)
-				sendto_one(sptr,
-				    ":%s NOTICE %s :server=%s hash=%i",
-				    me.name, sptr->name, ptr->name, hash_index);
-			ptr = ptr->next;
-		}
-	}
-
 }

@@ -91,23 +91,22 @@ int (*register_user)(aClient *cptr, aClient *sptr, char *nick, char *username, c
 int (*tkl_hash)(unsigned int c);
 char (*tkl_typetochar)(int type);
 aTKline *(*tkl_add_line)(int type, char *usermask, char *hostmask, char *reason, char *setby,
-    TS expire_at, TS set_at, TS spamf_tkl_duration, char *spamf_tkl_reason, MatchType match_type);
+    TS expire_at, TS set_at, TS spamf_tkl_duration, char *spamf_tkl_reason, MatchType match_type, int soft);
 aTKline *(*tkl_del_line)(aTKline *tkl);
 void (*tkl_check_local_remove_shun)(aTKline *tmp);
 aTKline *(*tkl_expire)(aTKline * tmp);
 EVENT((*tkl_check_expire));
-int (*find_tkline_match)(aClient *cptr, int xx);
+int (*find_tkline_match)(aClient *cptr, int skip_soft);
 int (*find_shun)(aClient *cptr);
 int(*find_spamfilter_user)(aClient *sptr, int flags);
 aTKline *(*find_qline)(aClient *cptr, char *nick, int *ishold);
-int  (*find_tkline_match_zap)(aClient *cptr);
+aTKline *(*find_tkline_match_zap)(aClient *cptr);
 void (*tkl_stats)(aClient *cptr, int type, char *para);
 void (*tkl_synch)(aClient *sptr);
 int (*m_tkl)(aClient *cptr, aClient *sptr, int parc, char *parv[]);
 int (*place_host_ban)(aClient *sptr, int action, char *reason, long duration);
 int (*dospamfilter)(aClient *sptr, char *str_in, int type, char *target, int flags, aTKline **rettk);
 int (*dospamfilter_viruschan)(aClient *sptr, aTKline *tk, int type);
-int  (*find_tkline_match_zap_ex)(aClient *cptr, aTKline **rettk);
 void (*send_list)(aClient *cptr);
 unsigned char *(*StripColors)(unsigned char *text);
 const char *(*StripControlCodes)(unsigned char *text);
@@ -166,11 +165,11 @@ static const EfunctionsList efunction_table[MAXEFUNCTIONS] = {
 /* 23 */	{"place_host_ban", (void *)&place_host_ban},
 /* 24 */	{"dospamfilter", (void *)&dospamfilter},
 /* 25 */	{"dospamfilter_viruschan", (void *)&dospamfilter_viruschan},
-/* 26 */	{"find_tkline_match_zap_ex", (void *)&find_tkline_match_zap_ex},
+/* 26 */	{NULL, NULL},
 /* 27 */	{"send_list", (void *)&send_list},
-/* 28 */	{NULL,NULL},
-/* 29 */	{NULL,NULL},
-/* 30 */	{NULL,NULL},
+/* 28 */	{NULL, NULL},
+/* 29 */	{NULL, NULL},
+/* 30 */	{NULL, NULL},
 /* 31 */	{"StripColors", (void *)&StripColors},
 /* 32 */	{"StripControlCodes", (void *)&StripControlCodes},
 /* 33 */	{"spamfilter_build_user_string", (void *)&spamfilter_build_user_string},
@@ -206,7 +205,7 @@ static const EfunctionsList efunction_table[MAXEFUNCTIONS] = {
 #ifdef UNDERSCORE
 void *obsd_dlsym(void *handle, char *symbol) {
     size_t buflen = strlen(symbol) + 2;
-    char *obsdsymbol = (char*)MyMalloc(buflen);
+    char *obsdsymbol = MyMallocEx(buflen);
     void *symaddr = NULL;
 
     if (obsdsymbol) {
@@ -344,6 +343,31 @@ unsigned int maj, min, plevel;
 		snprintf(buf, buflen, "%d.%d.%d", maj, min, plevel);
 }
 
+/** Transform a loadmodule path like "third/la" to
+ * something like "/home/xyz/unrealircd/modules/third/la.so
+ * (and other tricks)
+ */
+char *Module_TransformPath(char *path_)
+{
+	static char path[1024];
+
+	/* Prefix the module path with MODULESDIR, unless it's an absolute path
+	 * (we check for "/", "\" and things like "C:" to detect absolute paths).
+	 */
+	if ((*path_ != '/') && (*path_ != '\\') && !(*path_ && (path_[1] == ':')))
+	{
+		snprintf(path, sizeof(path), "%s/%s", MODULESDIR, path_);
+	} else {
+		strlcpy(path, path_, sizeof(path));
+	}
+
+	/* Auto-suffix .dll / .so */
+	if (!strstr(path, MODULE_SUFFIX))
+		strlcat(path, MODULE_SUFFIX, sizeof(path));
+
+	return path;
+}
+
 /*
  * Returns an error if insucessful .. yes NULL is OK! 
 */
@@ -361,8 +385,7 @@ char  *Module_Create(char *path_)
 	char    *Mod_Version;
 	unsigned int *compiler_version;
 	static char 	errorbuf[1024];
-	char		path[1024];
-	char 		*tmppath;
+	char 		*path, *tmppath;
 	ModuleHeader    *mod_header = NULL;
 	int		ret = 0;
 	Module          *mod = NULL, **Mod_Handle = NULL;
@@ -371,20 +394,8 @@ char  *Module_Create(char *path_)
 	long modsys_ver = 0;
 	Debug((DEBUG_DEBUG, "Attempting to load module from %s", path_));
 
-	/* Prefix the module path with MODULESDIR, unless it's an absolute path
-	 * (we check for "/", "\" and things like "C:" to detect absolute paths).
-_	 */
-	if ((*path_ != '/') && (*path_ != '\\') && !(*path_ && (path_[1] == ':')))
-	{
-		snprintf(path, sizeof(path), "%s/%s", MODULESDIR, path_);
-	} else {
-		strlcpy(path, path_, sizeof(path));
-	}
+	path = Module_TransformPath(path_);
 
-	/* auto-suffix .dll / .so */
-	if (!strstr(path, MODULE_SUFFIX))
-		strlcat(path, MODULE_SUFFIX, sizeof(path));
-	
 	tmppath = unreal_mktemp(TMPDIR, unreal_getmodfilename(path));
 	if (!tmppath)
 		return "Unable to create temporary file!";
@@ -557,7 +568,7 @@ Module *Module_make(ModuleHeader *header,
 {
 	Module *modp = NULL;
 	
-	modp = (Module *)MyMallocEx(sizeof(Module));
+	modp = MyMallocEx(sizeof(Module));
 	modp->header = header;
 	modp->dll = mod;
 	modp->flags = MODFLAG_NONE;
@@ -923,7 +934,7 @@ void	Module_AddAsChild(Module *parent, Module *child)
 {
 	ModuleChild	*childp = NULL;
 	
-	childp = (ModuleChild *) MyMallocEx(sizeof(ModuleChild));
+	childp = MyMallocEx(sizeof(ModuleChild));
 	childp->child = child;
 	AddListItem(childp, parent->children);
 }
@@ -1331,7 +1342,7 @@ Callback	*CallbackAddMain(Module *module, int cbtype, int (*func)(), void (*vfun
 {
 	Callback *p;
 	
-	p = (Callback *) MyMallocEx(sizeof(Callback));
+	p = MyMallocEx(sizeof(Callback));
 	if (func)
 		p->func.intfunc = func;
 	if (vfunc)
@@ -1342,7 +1353,7 @@ Callback	*CallbackAddMain(Module *module, int cbtype, int (*func)(), void (*vfun
 	p->owner = module;
 	AddListItem(p, Callbacks[cbtype]);
 	if (module) {
-		ModuleObject *cbobj = (ModuleObject *)MyMallocEx(sizeof(ModuleObject));
+		ModuleObject *cbobj = MyMallocEx(sizeof(ModuleObject));
 		cbobj->object.callback = p;
 		cbobj->type = MOBJ_CALLBACK;
 		AddListItem(cbobj, module->objects);
@@ -1387,7 +1398,7 @@ Efunction *p;
 		return NULL;
 	}
 	
-	p = (Efunction *) MyMallocEx(sizeof(Efunction));
+	p = MyMallocEx(sizeof(Efunction));
 	if (func)
 		p->func.intfunc = func;
 	if (vfunc)
@@ -1400,7 +1411,7 @@ Efunction *p;
 	p->owner = module;
 	AddListItem(p, Efunctions[eftype]);
 	if (module) {
-		ModuleObject *cbobj = (ModuleObject *)MyMallocEx(sizeof(ModuleObject));
+		ModuleObject *cbobj = MyMallocEx(sizeof(ModuleObject));
 		cbobj->object.efunction = p;
 		cbobj->type = MOBJ_EFUNCTION;
 		AddListItem(cbobj, module->objects);
@@ -1435,7 +1446,7 @@ Efunction *p, *q;
 	return NULL;
 }
 
-Cmdoverride *CmdoverrideAdd(Module *module, char *name, iFP function)
+Cmdoverride *CmdoverrideAddEx(Module *module, char *name, int priority, iFP function)
 {
 	aCommand *p;
 	Cmdoverride *ovr;
@@ -1458,6 +1469,7 @@ Cmdoverride *CmdoverrideAdd(Module *module, char *name, iFP function)
 	ovr = MyMallocEx(sizeof(Cmdoverride));
 	ovr->func = function;
 	ovr->owner = module; /* TODO: module objects */
+	ovr->priority = priority;
 	if (module)
 	{
 		ModuleObject *cmdoverobj = MyMallocEx(sizeof(ModuleObject));
@@ -1469,7 +1481,7 @@ Cmdoverride *CmdoverrideAdd(Module *module, char *name, iFP function)
 	ovr->command = p;
 	if (!p->overriders)
 		p->overridetail = ovr;
-	AddListItem(ovr, p->overriders);
+	AddListItemPrio(ovr, p->overriders, ovr->priority);
 	if (p->friend)
 	{
 		if (!p->friend->overriders)
@@ -1477,6 +1489,11 @@ Cmdoverride *CmdoverrideAdd(Module *module, char *name, iFP function)
 		AddListItem(ovr, p->friend->overriders);
 	}
 	return ovr;
+}
+
+Cmdoverride *CmdoverrideAdd(Module *module, char *name, iFP function)
+{
+	return CmdoverrideAddEx(module, name, 0, function);
 }
 
 void CmdoverrideDel(Cmdoverride *cmd)

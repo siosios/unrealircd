@@ -130,7 +130,7 @@ const char *inet_ntop(int, const void *, char *, size_t);
 int inet_pton(int af, const char *src, void *dst);
 #endif
 
-MODVAR int  global_count, max_global_count;
+extern MODVAR int  global_count, max_global_count;
 extern char *myctime(time_t);
 extern char *strtoken(char **, char *, char *);
 
@@ -142,8 +142,6 @@ extern char *strtoken(char **, char *, char *);
 #ifndef MIN
 #define MIN(a, b)	((a) < (b) ? (a) : (b))
 #endif
-
-#define DupString(x,y) do{int l=strlen(y);x=MyMalloc(l+1);(void)memcpy(x,y, l+1);}while(0)
 
 extern MODVAR u_char tolowertab[], touppertab[];
 
@@ -228,6 +226,7 @@ static char *StsMalloc(size_t size, char *file, long line)
 #endif
 
 #define safestrdup(x,y) do { if (x) MyFree(x); if (!y) x = NULL; else x = strdup(y); } while(0)
+#define safestrldup(x,y,sz) do { if (x) MyFree(x); if (!y) x = NULL; else x = strldup(y,sz); } while(0)
 #define safefree(x) do { if (x) MyFree(x); x = NULL; } while(0)
 
 extern struct SLink *find_user_link( /* struct SLink *, struct Client * */ );
@@ -292,7 +291,7 @@ extern int lu_noninv, lu_inv, lu_serv, lu_oper,
     lu_unknown, lu_channel, lu_lu, lu_lulocal, lu_lserv,
     lu_clu, lu_mlu, lu_cglobalu, lu_mglobalu;
 
-MODVAR TS   now;
+extern MODVAR TS   now;
 
 #ifndef _WIN32
 #if defined(__STDC__)

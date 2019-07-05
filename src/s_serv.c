@@ -23,8 +23,6 @@
 
 /* s_serv.c 2.55 2/7/94 (C) 1988 University of Oulu, Computing Center and Jarkko Oikarinen */
 
-#define AllocCpy(x,y) x  = (char *) MyMalloc(strlen(y) + 1); strcpy(x,y)
-
 #include "struct.h"
 #include "common.h"
 #include "sys.h"
@@ -461,7 +459,7 @@ char *get_client_name2(aClient *acptr, int showports)
 	 * in rows of get_client_name2's, so it's perfectly fair
 	 * 
 	*/
-	strcpy((char *)strrchr((char *)pointer, '.'), ".0]");
+	strcpy(strrchr(pointer, '.'), ".0]");
 
 	return pointer;
 }
@@ -582,7 +580,7 @@ void rehash_motdrules()
 ConfigItem_tld *tlds;
 
 	reread_motdsandrules();
-	for (tlds = conf_tld; tlds; tlds = (ConfigItem_tld *) tlds->next)
+	for (tlds = conf_tld; tlds; tlds = tlds->next)
 	{
 		/* read_motd() accepts NULL in first arg and acts sanely */
 		read_motd(tlds->motd_file, &tlds->motd);
@@ -816,11 +814,8 @@ CMD_FUNC(m_rehash)
 /*
 ** m_restart
 **
-** parv[1] - password *OR* reason if no X:line
-** parv[2] - reason for restart (optional & only if X:line exists)
-**
-** The password is only valid if there is a matching X line in the
-** config file. If it is not,  then it becomes the
+** parv[1] - password *OR* reason if no drpass { } block exists
+** parv[2] - reason for restart (optional & only if drpass block exists)
 */
 CMD_FUNC(m_restart)
 {
@@ -1116,7 +1111,7 @@ void do_read_motd(const char *filename, aMotdFile *themotd)
 			line[510] = '\0';
 
 		temp = MyMallocEx(sizeof(aMotdLine));
-		AllocCpy(temp->line, line);
+		temp->line = strdup(line);
 
 		if(last)
 			last->next = temp;

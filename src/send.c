@@ -75,14 +75,20 @@ int dead_link(aClient *to, char *notice)
 	DBufClear(&to->local->recvQ);
 	DBufClear(&to->local->sendQ);
 
-	if ((to->flags & FLAGS_DEADSOCKET) && to->local->error_str)
+	if (to->flags & FLAGS_DEADSOCKET)
 		return -1; /* already pending to be closed */
 
 	to->flags |= FLAGS_DEADSOCKET;
+
+	/* We may get here because of the 'CPR' in check_deadsockets().
+	 * In which case, we return -1 as well.
+	 */
+	if (to->local->error_str)
+		return -1; /* don't overwrite & don't send multiple times */
 	
 	if (!IsPerson(to) && !IsUnknown(to) && !(to->flags & FLAGS_CLOSING))
-		sendto_umode(UMODE_OPER, "Closing link: %s - %s",
-			notice, get_client_name(to, FALSE));
+		sendto_ops_and_log("Link to server %s (%s) closed: %s",
+			to->name, to->ip?to->ip:"<no-ip>", notice);
 	Debug((DEBUG_ERROR, "dead_link: %s - %s", notice, get_client_name(to, FALSE)));
 	to->local->error_str = strdup(notice);
 	return -1;
@@ -438,7 +444,7 @@ void sendto_chanops_butone(aClient *one, aChannel *chptr, char *pattern, ...)
 	for (lp = chptr->members; lp; lp = lp->next)
 	{
 		acptr = lp->cptr;
-		if (acptr == one || !(lp->flags & (CHFL_CHANOP|CHFL_CHANOWNER|CHFL_CHANPROT)))
+		if (acptr == one || !(lp->flags & (CHFL_HALFOP|CHFL_CHANOP|CHFL_CHANOWNER|CHFL_CHANPROT)))
 			continue;	/* ...was the one I should skip
 					   or user not not a channel op */
 		if (MyConnect(acptr) && IsRegisteredUser(acptr))
@@ -688,7 +694,7 @@ void sendto_match_servs(aChannel *chptr, aClient *from, char *format, ...)
 			mask++;
 	}
 	else
-		mask = (char *)NULL;
+		mask = NULL;
 
 	list_for_each_entry(cptr, &server_list, special_node)
 	{
@@ -1439,4 +1445,46 @@ va_list vl;
 	va_start(vl, pattern);
 	vsendto_one(to, realpattern, vl);
 	va_end(vl);
+}
+
+/** Send raw data directly to socket, bypassing everything.
+ * Looks like an interesting function to call? NO! STOP!
+ * Don't use this function. It may only be used by the initial
+ * Z-Line check via the codepath to banned_client().
+ * YOU SHOULD NEVER USE THIS FUNCTION.
+ * If you want to send raw data (without formatting) to a client
+ * then have a look at sendbufto_one() instead.
+ *
+ * Side-effects:
+ * Too many to list here. Only in the early accept code the
+ * "if's" and side-effects are under control.
+ *
+ * By the way, did I already mention that you SHOULD NOT USE THIS
+ * FUNCTION? ;)
+ */
+void send_raw_direct(aClient *user, char *pattern, ...)
+{
+	va_list vl;
+	int sendlen;
+
+	*sendbuf = '\0';
+	va_start(vl, pattern);
+	sendlen = vmakebuf_local_withprefix(sendbuf, sizeof sendbuf, user, pattern, vl);
+	va_end(vl);
+	(void)send(user->fd, sendbuf, sendlen, 0);
+}
+
+/** Send a message to all locally connected IRCOps and log the error.
+ */
+void sendto_ops_and_log(char *pattern, ...)
+{
+	va_list vl;
+	char buf[1024];
+
+	va_start(vl, pattern);
+	ircvsnprintf(buf, sizeof(buf), pattern, vl);
+	va_end(vl);
+
+	ircd_log(LOG_ERROR, "%s", buf);
+	sendto_umode(UMODE_OPER, "%s", buf);
 }

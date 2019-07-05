@@ -87,7 +87,7 @@ int _check_deny_version(aClient *cptr, char *version_string, int protocol, char 
 {
 	ConfigItem_deny_version *vlines;
 	
-	for (vlines = conf_deny_version; vlines; vlines = (ConfigItem_deny_version *) vlines->next)
+	for (vlines = conf_deny_version; vlines; vlines = vlines->next)
 	{
 		if (!match(vlines->mask, cptr->name))
 			break;
@@ -271,7 +271,7 @@ int _verify_link(aClient *cptr, aClient *sptr, char *servername, ConfigItem_link
 				servername);
 
 			sendto_one(cptr, "ERROR :%s", xerrmsg);
-			sendto_umode(UMODE_OPER, "Outgoing link aborted to %s(%s@%s) (%s) %s",
+			sendto_ops_and_log("Outgoing link aborted to %s(%s@%s) (%s) %s",
 				cptr->serv->conf->servername, cptr->username, cptr->local->sockhost, xerrmsg, inpath);
 			return exit_client(cptr, sptr, &me, xerrmsg);
 		}
@@ -279,7 +279,7 @@ int _verify_link(aClient *cptr, aClient *sptr, char *servername, ConfigItem_link
 		goto skip_host_check;
 	} else {
 		/* Hunt the linkblock down ;) */
-		for(link = conf_link; link; link = (ConfigItem_link *) link->next)
+		for(link = conf_link; link; link = link->next)
 			if (!match(link->servername, servername))
 				break;
 	}
@@ -307,7 +307,7 @@ errlink:
 		    "ERROR :Link denied (No link block found named '%s' or link::incoming::mask did not match your IP %s) %s",
 		    servername, GetIP(cptr), inpath);
 		/* And send the "verbose" error msg only to locally connected ircops */
-		sendto_umode(UMODE_OPER, "Link denied for %s(%s@%s) (%s) %s",
+		sendto_ops_and_log("Link denied for %s(%s@%s) (%s) %s",
 		    servername, cptr->username, cptr->local->sockhost, xerrmsg, inpath);
 		return exit_client(cptr, sptr, &me,
 		    "Link denied (No link block found with your server name or link::incoming::mask did not match)");
@@ -320,7 +320,7 @@ skip_host_check:
 		sendto_one(cptr,
 		    "ERROR :Link '%s' denied (Authentication failed) %s",
 		    servername, inpath);
-		sendto_umode(UMODE_OPER, "Link denied for '%s' (Authentication failed [Bad password?]) %s",
+		sendto_ops_and_log("Link denied for '%s' (Authentication failed [Bad password?]) %s",
 			servername, inpath);
 		return exit_client(cptr, sptr, &me,
 		    "Link denied (Authentication failed)");
@@ -336,7 +336,7 @@ skip_host_check:
 			sendto_one(cptr,
 				"ERROR :Link '%s' denied (Not using SSL/TLS) %s",
 				servername, inpath);
-			sendto_umode(UMODE_OPER, "Link denied for '%s' (Not using SSL/TLS and verify-certificate is on) %s",
+			sendto_ops_and_log("Link denied for '%s' (Not using SSL/TLS and verify-certificate is on) %s",
 				servername, inpath);
 			return exit_client(cptr, sptr, &me,
 				"Link denied (Not using SSL/TLS)");
@@ -346,9 +346,9 @@ skip_host_check:
 			sendto_one(cptr,
 				"ERROR :Link '%s' denied (Certificate verification failed) %s",
 				servername, inpath);
-			sendto_umode(UMODE_OPER, "Link denied for '%s' (Certificate verification failed) %s",
+			sendto_ops_and_log("Link denied for '%s' (Certificate verification failed) %s",
 				servername, inpath);
-			sendto_umode(UMODE_OPER, "Reason for certificate verification failure: %s", errstr);
+			sendto_ops_and_log("Reason for certificate verification failure: %s", errstr);
 			return exit_client(cptr, sptr, &me,
 				"Link denied (Certificate verification failed)");
 		}
@@ -364,7 +364,7 @@ skip_host_check:
 
 		if (IsMe(acptr))
 		{
-			sendto_realops("Link %s rejected, server trying to link with my name (%s)",
+			sendto_ops_and_log("Link %s rejected, server trying to link with my name (%s)",
 				get_client_name(sptr, TRUE), me.name);
 			sendto_one(sptr, "ERROR: Server %s exists (it's me!)", me.name);
 			return exit_client(sptr, sptr, sptr, "Server Exists");
@@ -379,7 +379,7 @@ skip_host_check:
 		    "ERROR :Server %s already exists from %s",
 		    servername,
 		    (ocptr->from ? ocptr->from->name : "<nobody>"));
-		sendto_realops
+		sendto_ops_and_log
 		    ("Link %s cancelled, server %s already exists from %s",
 		    get_client_name(acptr, TRUE), servername,
 		    (ocptr->from ? ocptr->from->name : "<nobody>"));
@@ -388,7 +388,7 @@ skip_host_check:
 	}
 	if ((bconf = Find_ban(NULL, servername, CONF_BAN_SERVER)))
 	{
-		sendto_realops
+		sendto_ops_and_log
 			("Cancelling link %s, banned server",
 			get_client_name(cptr, TRUE));
 		sendto_one(cptr, "ERROR :Banned server (%s)", bconf->reason ? bconf->reason : "no reason");
@@ -396,15 +396,14 @@ skip_host_check:
 	}
 	if (link->class->clients + 1 > link->class->maxclients)
 	{
-		sendto_realops
-			("Cancelling link %s, full class",
+		sendto_ops_and_log("Cancelling link %s, full class",
 				get_client_name(cptr, TRUE));
 		return exit_client(cptr, cptr, &me, "Full class");
 	}
 	if (!IsLocal(cptr) && (iConf.plaintext_policy_server == PLAINTEXT_POLICY_DENY) && !IsSecure(cptr))
 	{
 		sendto_one(cptr, "ERROR :Servers need to use SSL/TLS (set::plaintext-policy::server is 'deny')");
-		sendto_realops("Rejected insecure server. See https://www.unrealircd.org/docs/FAQ#ERROR:_Servers_need_to_use_SSL.2FTLS");
+		sendto_ops_and_log("Rejected insecure server %s. See https://www.unrealircd.org/docs/FAQ#ERROR:_Servers_need_to_use_SSL.2FTLS", cptr->name);
 		return exit_client(cptr, sptr, &me, "Servers need to use SSL/TLS (set::plaintext-policy::server is 'deny')");
 	}
 	if (link_out)
@@ -552,11 +551,11 @@ CMD_FUNC(m_server)
 			strlcpy(cptr->info, info[0] ? info : "server", sizeof(cptr->info));
 		}
 
-		for (deny = conf_deny_link; deny; deny = (ConfigItem_deny_link *) deny->next)
+		for (deny = conf_deny_link; deny; deny = deny->next)
 		{
 			if (deny->flag.type == CRULE_ALL && !match(deny->mask, servername)
 				&& crule_eval(deny->rule)) {
-				sendto_ops("Refused connection from %s.",
+				sendto_ops_and_log("Refused connection from %s. Rejected by deny link { } block.",
 					get_client_host(cptr));
 				return exit_client(cptr, cptr, cptr,
 					"Disallowed by connection rule");
@@ -600,7 +599,7 @@ CMD_FUNC(m_server_remote)
 
 		if (IsMe(acptr))
 		{
-			sendto_realops("Link %s rejected, server trying to link with my name (%s)",
+			sendto_ops_and_log("Link %s rejected, server trying to link with my name (%s)",
 				get_client_name(sptr, TRUE), me.name);
 			sendto_one(sptr, "ERROR: Server %s exists (it's me!)", me.name);
 			return exit_client(sptr, sptr, sptr, "Server Exists");
@@ -615,7 +614,7 @@ CMD_FUNC(m_server_remote)
 		    "ERROR :Server %s already exists from %s",
 		    servername,
 		    (ocptr->from ? ocptr->from->name : "<nobody>"));
-		sendto_realops
+		sendto_ops_and_log
 		    ("Link %s cancelled, server %s already exists from %s",
 		    get_client_name(acptr, TRUE), servername,
 		    (ocptr->from ? ocptr->from->name : "<nobody>"));
@@ -633,8 +632,7 @@ CMD_FUNC(m_server_remote)
 	}
 	if ((bconf = Find_ban(NULL, servername, CONF_BAN_SERVER)))
 	{
-		sendto_realops
-			("Cancelling link %s, banned server %s",
+		sendto_ops_and_log("Cancelling link %s, banned server %s",
 			get_client_name(cptr, TRUE), servername);
 		sendto_one(cptr, "ERROR :Banned server (%s)", bconf->reason ? bconf->reason : "no reason");
 		return exit_client(cptr, cptr, &me, "Brought in banned server");
@@ -644,19 +642,19 @@ CMD_FUNC(m_server_remote)
 	strlcpy(info, parv[parc - 1], sizeof(info));
 	if (!cptr->serv->conf)
 	{
-		sendto_realops("Lost conf for %s!!, dropping link", cptr->name);
+		sendto_ops_and_log("Internal error: lost conf for %s!!, dropping link", cptr->name);
 		return exit_client(cptr, cptr, cptr, "Lost configuration");
 	}
 	aconf = cptr->serv->conf;
 	if (!aconf->hub)
 	{
-		sendto_umode(UMODE_OPER, "Link %s cancelled, is Non-Hub but introduced Leaf %s",
+		sendto_ops_and_log("Link %s cancelled, is Non-Hub but introduced Leaf %s",
 			cptr->name, servername);
 		return exit_client(cptr, cptr, cptr, "Non-Hub Link");
 	}
 	if (match(aconf->hub, servername))
 	{
-		sendto_umode(UMODE_OPER, "Link %s cancelled, linked in %s, which hub config disallows",
+		sendto_ops_and_log("Link %s cancelled, linked in %s, which hub config disallows",
 			cptr->name, servername);
 		return exit_client(cptr, cptr, cptr, "Not matching hub configuration");
 	}
@@ -664,14 +662,14 @@ CMD_FUNC(m_server_remote)
 	{
 		if (match(aconf->leaf, servername))
 		{
-			sendto_umode(UMODE_OPER, "Link %s(%s) cancelled, disallowed by leaf configuration",
+			sendto_ops_and_log("Link %s(%s) cancelled, disallowed by leaf configuration",
 				cptr->name, servername);
 			return exit_client(cptr, cptr, cptr, "Disallowed by leaf configuration");
 		}
 	}
 	if (aconf->leaf_depth && (hop > aconf->leaf_depth))
 	{
-			sendto_umode(UMODE_OPER, "Link %s(%s) cancelled, too deep depth",
+			sendto_ops_and_log("Link %s(%s) cancelled, too deep depth",
 				cptr->name, servername);
 			return exit_client(cptr, cptr, cptr, "Too deep link depth (leaf)");
 	}
@@ -688,8 +686,8 @@ CMD_FUNC(m_server_remote)
 	acptr->serv->up = find_or_add(acptr->srvptr->name);
 	SetServer(acptr);
 	ircd_log(LOG_SERVER, "SERVER %s (from %s)", acptr->name, acptr->srvptr->name);
-	/* Taken from bahamut makes it so all servers behind a U:lined
-	 * server are also U:lined, very helpful if HIDE_ULINES is on
+	/* Taken from bahamut makes it so all servers behind a U-Lined
+	 * server are also U-Lined, very helpful if HIDE_ULINES is on
 	 */
 	if (IsULine(sptr)
 	    || (Find_uline(acptr->name)))
@@ -853,9 +851,9 @@ int	m_server_synch(aClient *cptr, ConfigItem_link *aconf)
 	{
 		sendto_server(&me, 0, 0, ":%s SMO o :(\2link\2) Secure link %s -> %s established (%s)",
 			me.name,
-			me.name, inpath, (char *) ssl_get_cipher(cptr->local->ssl));
+			me.name, inpath, ssl_get_cipher(cptr->local->ssl));
 		sendto_realops("(\2link\2) Secure link %s -> %s established (%s)",
-			me.name, inpath, (char *) ssl_get_cipher(cptr->local->ssl));
+			me.name, inpath, ssl_get_cipher(cptr->local->ssl));
 		tls_link_notification_verify(cptr, aconf);
 	}
 	else
@@ -1008,68 +1006,106 @@ int	m_server_synch(aClient *cptr, ConfigItem_link *aconf)
 	return 0;
 }
 
-static int send_mode_list(aClient *cptr, char *chname, TS creationtime, Member *top, int mask, char flag)
+/** Send MODE +vhoaq list (depending on 'mask' and 'flag') to remote server.
+ * Previously this function was called send_mode_list() when it was dual-function.
+ */
+static void send_channel_modes_members(aClient *cptr, aChannel *chptr, int mask, char flag)
 {
 	Member *lp;
 	char *cp, *name;
-	int  count = 0, send = 0, sent = 0;
+	int  count = 0, send = 0;
 
 	cp = modebuf + strlen(modebuf);
 	if (*parabuf)		/* mode +l or +k xx */
 		count = 1;
-	for (lp = top; lp; lp = lp->next)
+	for (lp = chptr->members; lp; lp = lp->next)
 	{
-		/* 
-		 * Okay, since ban's are stored in their own linked
-		 * list, we won't even bother to check if CHFL_BAN
-		 * is set in the flags. This should work as long
-		 * as only ban-lists are feed in with CHFL_BAN mask.
-		 * However, we still need to typecast... -Donwulff 
-		 */
-		if ((mask == CHFL_BAN) || (mask == CHFL_EXCEPT) || (mask == CHFL_INVEX))
-		{
-/*			if (!(((Ban *)lp)->flags & mask)) continue; */
-			name = ((Ban *) lp)->banstr;
-		}
-		else
-		{
-			if (!(lp->flags & mask))
-				continue;
-			name = lp->cptr->name;
-		}
+		if (!(lp->flags & mask))
+			continue;
+		name = lp->cptr->name;
 		if (strlen(parabuf) + strlen(name) + 11 < (size_t)MODEBUFLEN)
 		{
 			if (*parabuf)
-				(void)strlcat(parabuf, " ", sizeof parabuf);
-			(void)strlcat(parabuf, name, sizeof parabuf);
+				strlcat(parabuf, " ", sizeof parabuf);
+			strlcat(parabuf, name, sizeof parabuf);
 			count++;
 			*cp++ = flag;
 			*cp = '\0';
 		}
 		else if (*parabuf)
 			send = 1;
+
 		if (count == RESYNCMODES)
 			send = 1;
+
 		if (send)
 		{
-			/* cptr is always a server! So we send creationtimes */
-			sendmodeto_one(cptr, me.name, chname, modebuf,
-			    parabuf, creationtime);
-			sent = 1;
+			/* cptr is always a server! So we send creationtime */
+			sendmodeto_one(cptr, me.name, chptr->chname, modebuf, parabuf, chptr->creationtime);
 			send = 0;
 			*parabuf = '\0';
 			cp = modebuf;
 			*cp++ = '+';
 			if (count != RESYNCMODES)
 			{
-				(void)strlcpy(parabuf, name, sizeof parabuf);
+				strlcpy(parabuf, name, sizeof parabuf);
 				*cp++ = flag;
 			}
 			count = 0;
 			*cp = '\0';
 		}
 	}
-	return sent;
+}
+
+/** Send list modes such as +beI to remote server.
+ * Previously this was combined with +vhoaq stuff in the send_mode_list() function.
+ */
+static void send_channel_modes_list_mode(aClient *cptr, aChannel *chptr, Ban *lp, char flag)
+{
+	char *cp, *name;
+	int count = 0, send = 0;
+
+	cp = modebuf + strlen(modebuf);
+
+	if (*parabuf)		/* mode +l or +k xx */
+		count = 1;
+
+	for (; lp; lp = lp->next)
+	{
+		name = lp->banstr;
+
+		if (strlen(parabuf) + strlen(name) + 11 < (size_t)MODEBUFLEN)
+		{
+			if (*parabuf)
+				strlcat(parabuf, " ", sizeof parabuf);
+			strlcat(parabuf, name, sizeof parabuf);
+			count++;
+			*cp++ = flag;
+			*cp = '\0';
+		}
+		else if (*parabuf)
+			send = 1;
+
+		if (count == RESYNCMODES)
+			send = 1;
+
+		if (send)
+		{
+			/* cptr is always a server! So we send creationtime */
+			sendmodeto_one(cptr, me.name, chptr->chname, modebuf, parabuf, chptr->creationtime);
+			send = 0;
+			*parabuf = '\0';
+			cp = modebuf;
+			*cp++ = '+';
+			if (count != RESYNCMODES)
+			{
+				strlcpy(parabuf, name, sizeof parabuf);
+				*cp++ = flag;
+			}
+			count = 0;
+			*cp = '\0';
+		}
+	}
 }
 
 /* A little kludge to prevent sending double spaces -- codemastr */
@@ -1085,92 +1121,42 @@ static inline void send_channel_mode(aClient *cptr, char *from, aChannel *chptr)
 			modebuf, chptr->creationtime);
 }
 
-/*
- * send "cptr" a full list of the modes for channel chptr.
+/**  Send "cptr" a full list of the MODEs for channel chptr.
+ * Note that this function is only used for servers lacking SJOIN/SJOIN3.
  */
 void send_channel_modes(aClient *cptr, aChannel *chptr)
 {
-	int  sent;
-/* fixed a bit .. to fit halfops --sts */
 	if (*chptr->chname != '#')
 		return;
 
-	*parabuf = '\0';
-	*modebuf = '\0';
+	/* Send the "property" channel modes like +lks */
+	*modebuf = *parabuf = '\0';
 	channel_modes(cptr, modebuf, parabuf, sizeof(modebuf), sizeof(parabuf), chptr);
-	sent = send_mode_list(cptr, chptr->chname, chptr->creationtime,
-	    chptr->members, CHFL_CHANOP, 'o');
-	if (!sent && chptr->creationtime)
-		send_channel_mode(cptr, me.name, chptr);
-	else if (modebuf[1] || *parabuf)
-		sendmodeto_one(cptr, me.name,
-		    chptr->chname, modebuf, parabuf, chptr->creationtime);
+	send_channel_mode(cptr, me.name, chptr);
 
-	*parabuf = '\0';
-	*modebuf = '+';
+	/* Then send the +qaohv in one go */
+	modebuf[0] = '+';
 	modebuf[1] = '\0';
-
-	sent = send_mode_list(cptr, chptr->chname, chptr->creationtime,
-	    chptr->members, CHFL_HALFOP, 'h');
-	if (!sent && chptr->creationtime)
-		send_channel_mode(cptr, me.name, chptr);
-	else if (modebuf[1] || *parabuf)
-		sendmodeto_one(cptr, me.name,
-		    chptr->chname, modebuf, parabuf, chptr->creationtime);
-
-	*parabuf = '\0';
-	*modebuf = '+';
-	modebuf[1] = '\0';
-	(void)send_mode_list(cptr, chptr->chname, chptr->creationtime,
-	    (Member *)chptr->banlist, CHFL_BAN, 'b');
+	parabuf[0] = '\0';
+	send_channel_modes_members(cptr, chptr, CHFL_CHANOWNER, 'q');
+	send_channel_modes_members(cptr, chptr, CHFL_CHANPROT, 'a');
+	send_channel_modes_members(cptr, chptr, CHFL_CHANOP, 'o');
+	send_channel_modes_members(cptr, chptr, CHFL_HALFOP, 'h');
+	send_channel_modes_members(cptr, chptr, CHFL_VOICE, 'v');
+	/* ..including any remainder in the buffer.. */
 	if (modebuf[1] || *parabuf)
-		sendmodeto_one(cptr, me.name, chptr->chname, modebuf,
-		    parabuf, chptr->creationtime);
+		sendmodeto_one(cptr, me.name, chptr->chname, modebuf, parabuf, chptr->creationtime);
 
-	*parabuf = '\0';
-	*modebuf = '+';
+	/* Then send the +beI in one go */
+	modebuf[0] = '+';
 	modebuf[1] = '\0';
-	(void)send_mode_list(cptr, chptr->chname, chptr->creationtime,
-	    (Member *)chptr->exlist, CHFL_EXCEPT, 'e');
+	parabuf[0] = '\0';
+	send_channel_modes_list_mode(cptr, chptr, chptr->banlist, 'b');
+	send_channel_modes_list_mode(cptr, chptr, chptr->exlist, 'e');
+	send_channel_modes_list_mode(cptr, chptr, chptr->invexlist, 'I');
+	/* ..including any remainder in the buffer.. */
 	if (modebuf[1] || *parabuf)
-		sendmodeto_one(cptr, me.name, chptr->chname, modebuf,
-		    parabuf, chptr->creationtime);
-
-	*parabuf = '\0';
-	*modebuf = '+';
-	modebuf[1] = '\0';
-	(void)send_mode_list(cptr, chptr->chname, chptr->creationtime,
-	    (Member *)chptr->invexlist, CHFL_INVEX, 'I');
-	if (modebuf[1] || *parabuf)
-		sendmodeto_one(cptr, me.name, chptr->chname, modebuf,
-		    parabuf, chptr->creationtime);
-
-	*parabuf = '\0';
-	*modebuf = '+';
-	modebuf[1] = '\0';
-	(void)send_mode_list(cptr, chptr->chname, chptr->creationtime,
-	    chptr->members, CHFL_VOICE, 'v');
-	if (modebuf[1] || *parabuf)
-		sendmodeto_one(cptr, me.name, chptr->chname, modebuf,
-		    parabuf, chptr->creationtime);
-
-	*parabuf = '\0';
-	*modebuf = '+';
-	modebuf[1] = '\0';
-	(void)send_mode_list(cptr, chptr->chname, chptr->creationtime,
-	    chptr->members, CHFL_CHANOWNER, 'q');
-	if (modebuf[1] || *parabuf)
-		sendmodeto_one(cptr, me.name, chptr->chname, modebuf,
-		    parabuf, chptr->creationtime);
-
-	*parabuf = '\0';
-	*modebuf = '+';
-	modebuf[1] = '\0';
-	(void)send_mode_list(cptr, chptr->chname, chptr->creationtime,
-	    chptr->members, CHFL_CHANPROT, 'a');
-	if (modebuf[1] || *parabuf)
-		sendmodeto_one(cptr, me.name, chptr->chname, modebuf,
-		    parabuf, chptr->creationtime);
+		sendmodeto_one(cptr, me.name, chptr->chname, modebuf, parabuf, chptr->creationtime);
 
 	/* send MLOCK here too... --nenolod */
 	if (CHECKPROTO(cptr, PROTO_MLOCK))
@@ -1196,7 +1182,7 @@ static int send_ban_list(aClient *cptr, char *chname, TS creationtime, aChannel 
 	top = channel->banlist;
 	for (lp = top; lp; lp = lp->next)
 	{
-		name = ((Ban *) lp)->banstr;
+		name = lp->banstr;
 
 		if (strlen(parabuf) + strlen(name) + 11 < (size_t)MODEBUFLEN)
 		{
@@ -1233,7 +1219,7 @@ static int send_ban_list(aClient *cptr, char *chname, TS creationtime, aChannel 
 	top = channel->exlist;
 	for (lp = top; lp; lp = lp->next)
 	{
-		name = ((Ban *) lp)->banstr;
+		name = lp->banstr;
 
 		if (strlen(parabuf) + strlen(name) + 11 < (size_t)MODEBUFLEN)
 		{
@@ -1270,7 +1256,7 @@ static int send_ban_list(aClient *cptr, char *chname, TS creationtime, aChannel 
 	top = channel->invexlist;
 	for (lp = top; lp; lp = lp->next)
 	{
-		name = ((Ban *) lp)->banstr;
+		name = lp->banstr;
 
 		if (strlen(parabuf) + strlen(name) + 11 < (size_t)MODEBUFLEN)
 		{

@@ -33,7 +33,7 @@ static char *replies[] = {
 /* 005    RPL_ISUPPORT */ ":%s 005 %s %s :are supported by this server",
 /* 006    RPL_MAP */      ":%s 006 %s :%s%-*s(%ld) %s",
 /* 007    RPL_MAPEND */   ":%s 007 %s :End of /MAP",
-/* 008    RPL_SNOMASK */  ":%s 008 %s :Server notice mask (%s)",
+/* 008    RPL_SNOMASK */  ":%s 008 %s %s :Server notice mask",
 /* 009 */ NULL, /* ircu */
 /* 010    RPL_REDIR */	  ":%s 010 %s %s %d :Please use this Server/Port instead",
 /* 011 */ NULL,
@@ -252,7 +252,7 @@ static char *replies[] = {
 /* 220    RPL_STATSBLINE */ ":%s 220 %s %c %s %s %s %d %d",
 /* 221    RPL_UMODEIS */ ":%s 221 %s %s",
 /* 222    RPL_SQLINE_NICK */ ":%s 222 %s %s :%s",
-/* 223    RPL_STATSGLINE */ ":%s 223 %s %c %s@%s %li %li %s :%s",
+/* 223    RPL_STATSGLINE */ ":%s 223 %s %c %s%s@%s %li %li %s :%s",
 /* 224    RPL_STATSTLINE */ ":%s 224 %s T %s %s %s",
 /* 225    RPL_STATSELINE */ ":%s 225 %s e %s",
 /* 226    RPL_STATSNLINE */ ":%s 226 %s n %s %s",

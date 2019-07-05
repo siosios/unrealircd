@@ -290,7 +290,7 @@ static void listener_accept(int listener_fd, int revents, void *data)
 		ircstp->is_ref++;
 		if (last_allinuse < TStime() - 15)
 		{
-			sendto_realops("All connections in use. ([@%s/%u])", listener->ip, listener->port);
+			sendto_ops_and_log("All connections in use. ([@%s/%u])", listener->ip, listener->port);
 			last_allinuse = TStime();
 		}
 
@@ -340,7 +340,7 @@ int inetport(ConfigItem_listen *listener, char *ip, int port, int ipv6)
 
 	if (++OpenFiles >= MAXCLIENTS)
 	{
-		sendto_ops("No more connections allowed (%s)", listener->ip);
+		sendto_ops_and_log("No more connections allowed (%s)", listener->ip);
 		fd_close(listener->fd);
 		listener->fd = -1;
 		--OpenFiles;
@@ -455,8 +455,7 @@ void close_listeners(void)
 	/* close all 'extra' listening ports we have */
 	for (aconf = conf_listen; aconf != NULL; aconf = aconf_next)
 	{
-		aconf_next = (ConfigItem_listen *) aconf->next;
-
+		aconf_next = aconf->next;
 		if (aconf->flag.temporary)
 			close_listener(aconf);
 	}
@@ -485,22 +484,23 @@ void init_sys(void)
 			(void)fprintf(stderr, "Fix MAXCONNECTIONS\n");
 			exit(-1);
 		}
-	limit.rlim_cur = limit.rlim_max;	/* make soft limit the max */
-	if (setrlimit(RLIMIT_FD_MAX, &limit) == -1)
-	{
+		limit.rlim_cur = limit.rlim_max;	/* make soft limit the max */
+		if (setrlimit(RLIMIT_FD_MAX, &limit) == -1)
+		{
 /* HACK: if it's mac os X then don't error... */
 #ifndef OSXTIGER
 #ifndef LONG_LONG_RLIM_T
-		(void)fprintf(stderr, "error setting max fd's to %ld\n",
+			(void)fprintf(stderr, "error setting max fd's to %ld\n",
 #else
-		(void)fprintf(stderr, "error setting max fd's to %lld\n",
+			(void)fprintf(stderr, "error setting max fd's to %lld\n",
 #endif
-		    limit.rlim_cur);
-		exit(-1);
-#endif
+			    limit.rlim_cur);
+			exit(-1);
+#endif // OSXTIGER
+		}
 	}
-}
-#endif
+#endif // RLIMIT_FD_MAX
+
 #ifndef _WIN32
 #ifdef BACKEND_SELECT
 	if (MAXCONNECTIONS > FD_SETSIZE)
@@ -511,70 +511,62 @@ void init_sys(void)
 	}
 #endif
 #endif
-#if defined(PCS) || defined(SVR3)
-char logbuf[BUFSIZ];
 
-(void)setvbuf(stderr, logbuf, _IOLBF, sizeof(logbuf));
-#else
-# if defined(HPUX)
-(void)setvbuf(stderr, NULL, _IOLBF, 0);
-# else
-#  if !defined(_SOLARIS) && !defined(_WIN32)
-(void)setlinebuf(stderr);
-#  endif
-# endif
-#endif
-#ifndef _WIN32
-#ifdef HAVE_SYSLOG
-closelog(); /* temporary close syslog, as we mass close() fd's below... */
-#endif
-
-if (bootopt & BOOT_TTY)		/* debugging is going to a tty */
-	goto init_dgram;
-
-if ((bootopt & BOOT_CONSOLE) || isatty(0))
-{
-#ifndef _AMIGA
-/*		if (fork())
-			exit(0);
-*/
-#endif
-#ifdef TIOCNOTTY
-	if ((fd = open("/dev/tty", O_RDWR)) >= 0)
-	{
-		(void)ioctl(fd, TIOCNOTTY, (char *)NULL);
-#ifndef NOCLOSEFD
-		(void)close(fd);
-#endif
-	}
-#endif
-
+	/* Create new session / set process group */
 #if defined(HPUX) || defined(_SOLARIS) || \
     defined(_POSIX_SOURCE) || defined(SVR4) || defined(SGI) || \
     defined(OSXTIGER) || defined(__QNX__)
 	(void)setsid();
-#else
+#elif !defined(_WIN32)
 	(void)setpgrp(0, (int)getpid());
 #endif
-#ifndef NOCLOSEFD
-	(void)close(0);		/* fd 0 opened by inetd */
-#endif
-}
-init_dgram:
-#else
-#ifndef NOCLOSEFD
-	close(fileno(stdin));
-	close(fileno(stdout));
-	if (!(bootopt & BOOT_DEBUG))
-	close(fileno(stderr));
-#endif
-#ifdef HAVE_SYSLOG
-openlog("ircd", LOG_PID | LOG_NDELAY, LOG_DAEMON); /* reopened now */
-#endif
-#endif /*_WIN32*/
 
 	init_resolver(1);
 	return;
+}
+
+/** Replace a file descriptor (*NIX only).
+ * @param oldfd: the old FD to close and re-use
+ * @param name: descriptive string of the old fd, eg: "stdin".
+ * @param mode: an open() mode, such as O_WRONLY.
+ */
+void replacefd(int oldfd, char *name, int mode)
+{
+#ifndef _WIN32
+	int newfd = open("/dev/null", mode);
+	if (newfd < 0)
+	{
+		fprintf(stderr, "Warning: could not open /dev/null\n");
+		return;
+	}
+	if (oldfd < 0)
+	{
+		fprintf(stderr, "Warning: could not replace %s (invalid fd)\n", name);
+		return;
+	}
+	if (dup2(newfd, oldfd) < 0)
+	{
+		fprintf(stderr, "Warning: could not replace %s (dup2 error)\n", name);
+		return;
+	}
+#endif
+}
+
+/* Mass close standard file descriptors.
+ * We used to really just close them here (or in init_sys() actually),
+ * making the fd's available for other purposes such as internet sockets.
+ * For safety we now dup2() them to /dev/null. This in case someone
+ * accidentally does a fprintf(stderr,..) somewhere in the code or some
+ * library outputs error messages to stderr (such as libc with heap
+ * errors). We don't want any IRC client to receive such a thing!
+ */
+void close_std_descriptors(void)
+{
+#if !defined(_WIN32) && !defined(NOCLOSEFD)
+	replacefd(fileno(stdin), "stdin", O_RDONLY);
+	replacefd(fileno(stdout), "stdout", O_WRONLY);
+	replacefd(fileno(stderr), "stderr", O_WRONLY);
+#endif
 }
 
 void write_pidfile(void)
@@ -620,7 +612,7 @@ void start_server_handshake(aClient *cptr)
 	if (!aconf)
 	{
 		/* Should be impossible. */
-		sendto_ops("Lost configuration for %s in start_server_handshake()", get_client_name(cptr, FALSE));
+		sendto_ops_and_log("Lost configuration for %s in start_server_handshake()", get_client_name(cptr, FALSE));
 		return;
 	}
 
@@ -671,7 +663,7 @@ void completed_connection(int fd, int revents, void *data)
 
 	if (!aconf)
 	{
-		sendto_ops("Lost configuration for %s", get_client_name(cptr, FALSE));
+		sendto_ops_and_log("Lost configuration for %s", get_client_name(cptr, FALSE));
 		return;
 	}
 
@@ -1000,6 +992,7 @@ aClient *add_connection(ConfigItem_listen *listener, int fd)
 {
 	aClient *acptr, *acptr2;
 	ConfigItem_ban *bconf;
+	aTKline *tk;
 	int i, j;
 	char *ip;
 	int port = 0;
@@ -1034,6 +1027,7 @@ add_con_refuse:
 	set_sockhost(acptr, ip);
 	acptr->ip = strdup(ip);
 	acptr->local->port = port;
+	acptr->fd = fd;
 
 	/* Tag loopback connections as FLAGS_LOCAL */
 	if (is_loopback_ip(acptr->ip))
@@ -1044,19 +1038,22 @@ add_con_refuse:
 
 	j = 1;
 
-	list_for_each_entry(acptr2, &unknown_list, lclient_node)
+	if (!Find_except(acptr, CONF_EXCEPT_THROTTLE))
 	{
-		if (!strcmp(acptr->ip,GetIP(acptr2)))
+		list_for_each_entry(acptr2, &unknown_list, lclient_node)
 		{
-			j++;
-			if (j > iConf.max_unknown_connections_per_ip)
+			if (!strcmp(acptr->ip,GetIP(acptr2)))
 			{
-				ircsnprintf(zlinebuf, sizeof(zlinebuf),
-					"ERROR :Closing Link: [%s] (Too many unknown connections from your IP)"
-					"\r\n",
-					acptr->ip);
-				(void)send(fd, zlinebuf, strlen(zlinebuf), 0);
-				goto add_con_refuse;
+				j++;
+				if (j > iConf.max_unknown_connections_per_ip)
+				{
+					ircsnprintf(zlinebuf, sizeof(zlinebuf),
+						"ERROR :Closing Link: [%s] (Too many unknown connections from your IP)"
+						"\r\n",
+						acptr->ip);
+					(void)send(fd, zlinebuf, strlen(zlinebuf), 0);
+					goto add_con_refuse;
+				}
 			}
 		}
 	}
@@ -1065,19 +1062,14 @@ add_con_refuse:
 	{
 		if (bconf)
 		{
-			ircsnprintf(zlinebuf, sizeof(zlinebuf),
-				"ERROR :Closing Link: [%s] (You are not welcome on "
-				"this server: %s. Email %s for more information.)\r\n",
-				acptr->ip,
-				bconf->reason ? bconf->reason : "no reason",
-				KLINE_ADDRESS);
-			(void)send(fd, zlinebuf, strlen(zlinebuf), 0);
+			banned_client(acptr, "K-Lined", bconf->reason ? bconf->reason : "no reason", 0, NO_EXIT_CLIENT);
 			goto add_con_refuse;
 		}
 	}
-	else if (find_tkline_match_zap(acptr) != -1)
+	else if ((tk = find_tkline_match_zap(acptr)))
 	{
-		(void)send(fd, zlinebuf, strlen(zlinebuf), 0);
+		ircstp->is_ref++;
+		banned_client(acptr, "Z-Lined", tk->reason, (tk->type & TKL_GLOBAL)?1:0, NO_EXIT_CLIENT);
 		goto add_con_refuse;
 	}
 	else
@@ -1097,7 +1089,6 @@ add_con_refuse:
 			add_throttling_bucket(acptr);
 	}
 
-	acptr->fd = fd;
 	acptr->local->listener = listener;
 	if (acptr->local->listener != NULL)
 		acptr->local->listener->clients++;
@@ -1345,8 +1336,12 @@ void read_packet(int fd, int revents, void *data)
 				return;
 
 			if (IsServer(cptr) || cptr->serv) /* server or outgoing connection */
+			{
 				sendto_umode_global(UMODE_OPER, "Lost connection to %s: Read error",
-				    get_client_name(cptr, FALSE));
+					get_client_name(cptr, FALSE));
+				ircd_log(LOG_ERROR, "Lost connection to %s: Read error",
+					get_client_name(cptr, FALSE));
+			}
 
 			exit_client(cptr, cptr, cptr, "Read error");
 			return;
@@ -1586,7 +1581,7 @@ int connect_inet(ConfigItem_link *aconf, aClient *cptr)
 	}
 	if (++OpenFiles >= MAXCLIENTS)
 	{
-		sendto_realops("No more connections allowed (%s)", cptr->name);
+		sendto_ops_and_log("No more connections allowed (%s)", cptr->name);
 		return 0;
 	}
 

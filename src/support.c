@@ -120,9 +120,9 @@ char *strerror(int err_no)
 	static char buff[40];
 	char *errp;
 
-	errp = (err_no > sys_nerr ? (char *)NULL : sys_errlist[err_no]);
+	errp = (err_no > sys_nerr ? NULL : sys_errlist[err_no]);
 
-	if (errp == (char *)NULL)
+	if (errp == NULL)
 	{
 		errp = buff;
 		(void)ircsnprintf(buff, sizeof(buff), "Unknown Error %d", err_no);
@@ -1268,6 +1268,36 @@ strlncat(char *dst, const char *src, size_t size, size_t n)
 	return ret;
 }
 #endif
+
+/* strldup(str,max) copies a string and ensures the new buffer
+ * is at most 'max' size, including nul byte. The syntax is pretty
+ * much identical to strlcpy() except that the buffer is newly
+ * allocated.
+ * If you wonder why not use strndup() instead?
+ * I feel that mixing code with strlcpy() and strndup() would be
+ * rather confusing since strlcpy() assumes buffer size including
+ * the nul byte and strndup() assumes without the nul byte and
+ * will write one character extra. Hence this strldup(). -- Syzop
+ */
+// WAS: #define strldup(buf, sz) (sz > 0 ? strndup(buf, sz-1) : NULL)
+char *strldup(const char *src, size_t max)
+{
+	char *ptr;
+	int n;
+
+	if ((max == 0) || !src)
+		return NULL;
+
+	n = strlen(src);
+	if (n > max-1)
+		n = max-1;
+
+	ptr = MyMallocEx(n+1);
+	memcpy(ptr, src, n);
+	ptr[n] = '\0';
+
+	return ptr;
+}
 
 static const char Base64[] =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

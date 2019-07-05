@@ -89,7 +89,7 @@ CMD_FUNC(m_invite)
 		return -1;
 	}
 
-	if (!(acptr = find_person(parv[1], (aClient *)NULL)))
+	if (!(acptr = find_person(parv[1], NULL)))
 	{
 		sendto_one(sptr, err_str(ERR_NOSUCHNICK),
 		    me.name, sptr->name, parv[1]);
@@ -233,6 +233,16 @@ CMD_FUNC(m_invite)
 			ircd_log(LOG_OVERRIDE,"OVERRIDE: %s (%s@%s) invited him/herself into %s (Overriding Key)",
 				sptr->name, sptr->user->username, sptr->user->realhost, chptr->chname);
 
+		}
+		else if (has_channel_mode(chptr, 'z'))
+		{
+			sendto_snomask_global(SNO_EYES,
+			  "*** OperOverride -- %s (%s@%s) invited him/herself into %s (overriding +z).",
+			  sptr->name, sptr->user->username, sptr->user->realhost, chptr->chname);
+
+			/* Logging implementation added by XeRXeS */
+			ircd_log(LOG_OVERRIDE,"OVERRIDE: %s (%s@%s) invited him/herself into %s (Overriding SSL-Only)",
+				sptr->name, sptr->user->username, sptr->user->realhost, chptr->chname);
 		}
 #ifdef OPEROVERRIDE_VERIFY
 		else if (chptr->mode.mode & MODE_SECRET || chptr->mode.mode & MODE_PRIVATE)

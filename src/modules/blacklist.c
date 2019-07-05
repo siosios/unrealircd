@@ -1,5 +1,5 @@
 /*
- * Blacklist support (currently just DNS Blacklists) 
+ * Blacklist support (currently only DNS Blacklists)
  * (C) Copyright 2015-.. Bram Matthys (Syzop) and the UnrealIRCd team
  *
  * This program is free software; you can redistribute it and/or modify
@@ -77,6 +77,11 @@ typedef struct _bluser BLUser;
 struct _bluser {
 	aClient *cptr;
 	int refcnt;
+	/* The following save_* fields are used by softbans: */
+	int save_action;
+	long save_tkltime;
+	char *save_opernotice;
+	char *save_reason;
 };
 
 /* Global variables */
@@ -90,7 +95,7 @@ void blacklist_free_conf(void);
 void delete_blacklist_block(Blacklist *e);
 void blacklist_md_free(ModData *md);
 int blacklist_handshake(aClient *cptr);
-int blacklist_quit(aClient *cptr, char *comment);
+int blacklist_preconnect(aClient *sptr);
 void blacklist_resolver_callback(void *arg, int status, int timeouts, struct hostent *he);
 int blacklist_start_check(aClient *cptr);
 int blacklist_dns_request(aClient *cptr, Blacklist *bl);
@@ -107,6 +112,8 @@ long SNO_BLACKLIST = 0L;
 MOD_TEST(blacklist)
 {
 	HookAdd(modinfo->handle, HOOKTYPE_CONFIGTEST, 0, blacklist_config_test);
+
+	CallbackAddEx(modinfo->handle, CALLBACKTYPE_BLACKLIST_CHECK, blacklist_start_check);
 	return MOD_SUCCESS;
 }
 
@@ -131,8 +138,7 @@ MOD_INIT(blacklist)
 
 	HookAdd(modinfo->handle, HOOKTYPE_CONFIGRUN, 0, blacklist_config_run);
 	HookAdd(modinfo->handle, HOOKTYPE_HANDSHAKE, 0, blacklist_handshake);
-	HookAdd(modinfo->handle, HOOKTYPE_LOCAL_QUIT, 0, blacklist_quit);
-	HookAdd(modinfo->handle, HOOKTYPE_UNKUSER_QUIT, 0, blacklist_quit);
+	HookAdd(modinfo->handle, HOOKTYPE_PRE_LOCAL_CONNECT, 0, blacklist_preconnect);
 	HookAdd(modinfo->handle, HOOKTYPE_REHASH, 0, blacklist_rehash);
 	HookAdd(modinfo->handle, HOOKTYPE_REHASH_COMPLETE, 0, blacklist_rehash_complete);
 
@@ -533,8 +539,12 @@ int blacklist_config_run(ConfigFile *cf, ConfigEntry *ce, int type)
 
 void blacklist_md_free(ModData *md)
 {
-	/* we have nothing to free actually, but we must set to zero */
-	md->l = 0;
+	BLUser *bl = md->ptr;
+
+	/* Mark bl->cptr as dead. Free the struct, if able. */
+	blacklist_free_bluser_if_able(bl);
+
+	md->ptr = NULL;
 }
 
 int blacklist_handshake(aClient *cptr)
@@ -556,11 +566,6 @@ int blacklist_start_check(aClient *cptr)
 		SetBLUser(cptr, MyMallocEx(sizeof(BLUser)));
 		BLUSER(cptr)->cptr = cptr;
 	}
-#ifdef DEBUGMODE
-	else {
-		abort(); /* hmmm. unless we add some /Blacklist CHECK command. then this needs to be removed */
-	}
-#endif
 
 	for (bl = conf_blacklist; bl; bl = bl->next)
 	{
@@ -573,27 +578,51 @@ int blacklist_start_check(aClient *cptr)
 			blacklist_dns_request(cptr, bl);
 	}
 	
-	/* Free bluser entry. This only happens if you have no blacklist configured or they fail very early */
-	if (BLUSER(cptr))
-		blacklist_free_bluser_if_able(BLUSER(cptr));
-
 	return 0;
 }
 
 int blacklist_dns_request(aClient *cptr, Blacklist *d)
 {
-	char buf[256];
-	int e[4];
+	char buf[256], wbuf[128];
+	unsigned int e[8];
 	char *ip = GetIP(cptr);
 	
-	if (!ip || !strchr(ip, '.'))
+	if (!ip)
 		return 0;
-	
+
 	memset(&e, 0, sizeof(e));
-	if (sscanf(ip, "%d.%d.%d.%d", &e[0], &e[1], &e[2], &e[3]) != 4)
-		return 0;
+
+	if (strchr(ip, '.'))
+	{
+		/* IPv4 */
+		if (sscanf(ip, "%u.%u.%u.%u", &e[0], &e[1], &e[2], &e[3]) != 4)
+			return 0;
 	
-	snprintf(buf, sizeof(buf), "%d.%d.%d.%d.%s", e[3], e[2], e[1], e[0], d->backend->dns->name);
+		snprintf(buf, sizeof(buf), "%u.%u.%u.%u.%s", e[3], e[2], e[1], e[0], d->backend->dns->name);
+	} else
+	if (strchr(ip, ':'))
+	{
+		int i, j;
+		/* IPv6 */
+		if (sscanf(ip, "%x:%x:%x:%x:%x:%x:%x:%x",
+		    &e[0], &e[1], &e[2], &e[3], &e[4], &e[5], &e[6], &e[7]) != 8)
+		{
+			return 0;
+		}
+		*buf = '\0';
+		for (i = 7; i >= 0; i--)
+		{
+			snprintf(wbuf, sizeof(wbuf), "%x.%x.%x.%x.",
+				(unsigned int)(e[i] & 0xf),
+				(unsigned int)((e[i] >> 4) & 0xf),
+				(unsigned int)((e[i] >> 8) & 0xf),
+				(unsigned int)((e[i] >> 12) & 0xf));
+			strlcat(buf, wbuf, sizeof(buf));
+		}
+		strlcat(buf, d->backend->dns->name, sizeof(buf));
+	}
+	else
+		return 0; /* unknown IP format */
 
 	BLUSER(cptr)->refcnt++; /* one (more) blacklist result remaining */
 	
@@ -615,14 +644,24 @@ int blacklist_quit(aClient *cptr, char *comment)
 	return 0;
 }
 
+/** Free the BLUSER() struct, if we are able to do so.
+ * This should only be called if the underlying client is dead or dyeing
+ * and not earlier.
+ * Reasons why we 'are not able' are: refcnt is non-zero, that is:
+ * there is still an outstanding resolver request (eg: slow blacklist).
+ * In that case, no worries, we will be called again after that request
+ * is finished.
+ */
 void blacklist_free_bluser_if_able(BLUser *bl)
 {
+	if (bl->cptr)
+		bl->cptr = NULL;
+
 	if (bl->refcnt > 0)
 		return; /* unable, still have DNS requests/replies in-flight */
 
-	if (bl->cptr)
-		SetBLUser(bl->cptr, NULL);
-	
+	safefree(bl->save_opernotice);
+	safefree(bl->save_reason);
 	MyFree(bl);
 }
 
@@ -643,13 +682,16 @@ int dots = 0;
 /* Parse DNS reply.
  * A reply will be an A record in the format x.x.x.<reply>
  */
-int blacklist_parse_reply(struct hostent *he)
+int blacklist_parse_reply(struct hostent *he, int entry)
 {
 	char ipbuf[64];
 	char *p;
 
+	if ((he->h_addrtype != AF_INET) || (he->h_length != 4))
+		return 0;
+
 	*ipbuf = '\0';
-	if (!inet_ntop(AF_INET, he->h_addr_list[0], ipbuf, sizeof(ipbuf)))
+	if (!inet_ntop(AF_INET, he->h_addr_list[entry], ipbuf, sizeof(ipbuf)))
 		return 0;
 	
 	p = strrchr(ipbuf, '.');
@@ -659,23 +701,33 @@ int blacklist_parse_reply(struct hostent *he)
 	return atoi(p+1);
 }
 
+/** Take the actual ban action.
+ * Called from blacklist_hit() and for immediate bans and
+ * from blacklist_preconnect() for softbans that need to be delayed
+ * as to give the user the opportunity to do SASL Authentication.
+ */
+int blacklist_action(aClient *acptr, char *opernotice, int ban_action, char *ban_reason, long ban_time)
+{
+	sendto_snomask(SNO_BLACKLIST, "%s", opernotice);
+	ircd_log(LOG_KILL, "%s", opernotice);
+	return place_host_ban(acptr, ban_action, ban_reason, ban_time);
+}
+
 void blacklist_hit(aClient *acptr, Blacklist *bl, int reply)
 {
-	char buf[512];
+	char opernotice[512], banbuf[512];
 	char *name[4], *value[4];
+	BLUser *blu = BLUSER(acptr);
 
-	if (find_tkline_match(acptr, 0) < 0)
+	if (find_tkline_match(acptr, 1) < 0)
 		return; /* already klined/glined. Don't send the warning from below. */
 
 	if (IsPerson(acptr))
-		snprintf(buf, sizeof(buf), "[Blacklist] IP %s (%s) matches blacklist %s (%s/reply=%d)",
+		snprintf(opernotice, sizeof(opernotice), "[Blacklist] IP %s (%s) matches blacklist %s (%s/reply=%d)",
 			GetIP(acptr), acptr->name, bl->name, bl->backend->dns->name, reply);
 	else
-		snprintf(buf, sizeof(buf), "[Blacklist] IP %s matches blacklist %s (%s/reply=%d)",
+		snprintf(opernotice, sizeof(opernotice), "[Blacklist] IP %s matches blacklist %s (%s/reply=%d)",
 			GetIP(acptr), bl->name, bl->backend->dns->name, reply);
-	
-	sendto_snomask(SNO_BLACKLIST, "%s", buf);
-	ircd_log(LOG_KILL, "%s", buf);
 
 	name[0] = "ip";
 	value[0] = GetIP(acptr);
@@ -684,9 +736,19 @@ void blacklist_hit(aClient *acptr, Blacklist *bl, int reply)
 	name[2] = NULL;
 	value[2] = NULL;
 
-	buildvarstring(bl->reason, buf, sizeof(buf), name, value);
-	
-	place_host_ban(acptr, bl->action, buf, bl->ban_time);
+	buildvarstring(bl->reason, banbuf, sizeof(banbuf), name, value);
+
+	if (IsSoftBanAction(bl->action) && blu)
+	{
+		/* For soft bans, delay the action until later (so user can do SASL auth) */
+		blu->save_action = bl->action;
+		blu->save_tkltime = bl->ban_time;
+		safestrdup(blu->save_opernotice, opernotice);
+		safestrdup(blu->save_reason, banbuf);
+	} else {
+		/* Otherwise, execute the action immediately */
+		blacklist_action(acptr, opernotice, bl->action, banbuf, bl->ban_time);
+	}
 }
 
 void blacklist_process_result(aClient *acptr, int status, struct hostent *he)
@@ -695,6 +757,7 @@ void blacklist_process_result(aClient *acptr, int status, struct hostent *he)
 	char *domain;
 	int reply;
 	int i;
+	int replycnt;
 	
 	if ((status != 0) || (he->h_length != 4) || !he->h_name)
 		return; /* invalid reply */
@@ -706,16 +769,20 @@ void blacklist_process_result(aClient *acptr, int status, struct hostent *he)
 	if (!bl)
 		return; /* possibly just rehashed and the blacklist block is gone now */
 	
-	reply = blacklist_parse_reply(he);
-	
-	for (i = 0; bl->backend->dns->reply[i]; i++)
+	/* walk through all replies for this record... until we have a hit */
+	for (replycnt=0; he->h_addr_list[replycnt]; replycnt++)
 	{
-		if ((bl->backend->dns->reply[i] == -1) ||
-		    ( (bl->backend->dns->type == DNSBL_BITMASK) && (reply & bl->backend->dns->reply[i]) ) ||
-		    ( (bl->backend->dns->type == DNSBL_RECORD) && (bl->backend->dns->reply[i] == reply) ) )
+		reply = blacklist_parse_reply(he, replycnt);
+
+		for (i = 0; bl->backend->dns->reply[i]; i++)
 		{
-			blacklist_hit(acptr, bl, reply);
-			return;
+			if ((bl->backend->dns->reply[i] == -1) ||
+				( (bl->backend->dns->type == DNSBL_BITMASK) && (reply & bl->backend->dns->reply[i]) ) ||
+				( (bl->backend->dns->type == DNSBL_RECORD) && (bl->backend->dns->reply[i] == reply) ) )
+			{
+				blacklist_hit(acptr, bl, reply);
+				return;
+			}
 		}
 	}
 }
@@ -724,13 +791,34 @@ void blacklist_resolver_callback(void *arg, int status, int timeouts, struct hos
 {
 	BLUser *blu = (BLUser *)arg;
 	aClient *acptr = blu->cptr;
-	
+
 	blu->refcnt--; /* one less outstanding DNS request remaining */
-	blacklist_free_bluser_if_able(blu);
+
+	/* If we are the last to resolve something and the client is gone
+	 * already then free the struct.
+	 */
+	if ((blu->refcnt == 0) && !acptr)
+		blacklist_free_bluser_if_able(blu);
+
 	blu = NULL;
 
 	if (!acptr)
 		return; /* Client left already */
+	/* ^^ note: do not merge this with the other 'if' a few lines up (refcnt!) */
 
 	blacklist_process_result(acptr, status, he);
+}
+
+int blacklist_preconnect(aClient *acptr)
+{
+	BLUser *blu = BLUSER(acptr);
+
+	if (!blu || !blu->save_action)
+		return 0;
+
+	/* There was a pending softban... has the user authenticated via SASL by now? */
+	if (IsLoggedIn(acptr))
+		return 0; /* yup, so the softban does not apply. */
+
+	return blacklist_action(acptr, blu->save_opernotice, blu->save_action, blu->save_reason, blu->save_tkltime);
 }

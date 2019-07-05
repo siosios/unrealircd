@@ -127,7 +127,7 @@ void	flag_add(char ch)
 	if (extraflags)
 	{
 		char tmp[2] = { ch, 0 };
-		newextra = (char *)MyMalloc(strlen(extraflags) + 2);
+		newextra = MyMallocEx(strlen(extraflags) + 2);
 		strcpy(newextra, extraflags);
 		strcat(newextra, tmp);
 		MyFree(extraflags);
@@ -151,7 +151,7 @@ void	flag_del(char ch)
 	for (newsz = 0, p = extraflags; *p; p++)
 		if (*p != ch)
 			newsz++;
-	newflags = MyMalloc(newsz + 1);
+	newflags = MyMallocEx(newsz + 1);
 	for (p = newflags, op = extraflags; (*op) && (newsz); newsz--, op++)
 		if (*op != ch)
 			*p++ = *op;
@@ -196,7 +196,11 @@ void debug(int level, char *form, ...)
 
 #ifndef _WIN32
 		strlcat(debugbuf, "\n", sizeof(debugbuf));
-		write(debugfd, debugbuf, strlen(debugbuf));
+		if (write(debugfd, debugbuf, strlen(debugbuf)) < 0)
+		{
+			/* Yeah.. what can we do if output isn't working? Outputting an error makes no sense */
+			;
+		}
 #else
 		strlcat(debugbuf, "\r\n", sizeof(debugbuf));
 		OutputDebugString(debugbuf);

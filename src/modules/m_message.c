@@ -552,7 +552,7 @@ size_t n = strlen(f);
  * 0:			block
  * <0:			immediately return with this value (could be FLUSH_BUFFER)
  * HISTORY:
- * F:Line stuff by _Jozeph_ added by Stskeeps with comments.
+ * Dcc ban stuff by _Jozeph_ added by Stskeeps with comments.
  * moved and various improvements by Syzop.
  */
 static int check_dcc(aClient *sptr, char *target, aClient *targetcli, char *text)
@@ -581,7 +581,7 @@ int size_string, ret;
 			me.name, sptr->name);
 		return 0;
 	}
-	for (; (*ctcp == ' '); ctcp++); /* skip leading spaces */
+	for (; *ctcp == ' '; ctcp++); /* skip leading spaces */
 
 	if (*ctcp == '"' && *(ctcp+1))
 		end = index(ctcp+1, '"');
@@ -839,6 +839,12 @@ char *_StripControlCodes(unsigned char *text)
 			case 29:
 				/* italic */
 				break;
+			case 30:
+				/* strikethrough */
+				break;
+			case 17:
+				/* monospace */
+				break;
 			default:
 				new_str[i] = *text;
 				i++;
@@ -865,7 +871,12 @@ int	ban_version(aClient *sptr, char *text)
 		text[len-1] = '\0'; /* remove CTCP REPLY terminator (ASCII 1) */
 
 	if ((ban = Find_ban(NULL, text, CONF_BAN_VERSION)))
+	{
+		if (IsSoftBanAction(ban->action) && IsLoggedIn(sptr))
+			return 0; /* we are exempt */
+
 		return place_host_ban(sptr, ban->action, ban->reason, BAN_VERSION_TKL_TIME);
+	}
 
 	return 0;
 }

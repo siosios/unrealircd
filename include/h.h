@@ -48,7 +48,7 @@ extern MODVAR time_t timeofday;
 /* get_recvq is only called in send.c for local connections */
 #define get_recvq(x) ((x)->local->class->recvq ? (x)->local->class->recvq : DEFAULT_RECVQ)
 
-#define CMD_FUNC(x) int __attribute__((warn_unused_result)) (x) (aClient *cptr, aClient *sptr, int parc, char *parv[])
+#define CMD_FUNC(x) int (x) (aClient *cptr, aClient *sptr, int parc, char *parv[])
 
 /*
  * Configuration linked lists
@@ -68,6 +68,7 @@ extern MODVAR ConfigItem_allow		*conf_allow;
 extern MODVAR ConfigItem_except	*conf_except;
 extern MODVAR ConfigItem_vhost		*conf_vhost;
 extern MODVAR ConfigItem_link		*conf_link;
+extern MODVAR ConfigItem_sni		*conf_sni;
 extern MODVAR ConfigItem_ban		*conf_ban;
 extern MODVAR ConfigItem_deny_dcc	*conf_deny_dcc;
 extern MODVAR ConfigItem_deny_channel  *conf_deny_channel;
@@ -289,6 +290,7 @@ extern void sendto_snomask_normal(int snomask, char *pattern, ...) __attribute__
 extern void sendto_snomask_normal_global(int snomask, char *pattern, ...) __attribute__((format(printf,2,3)));
 extern void sendnotice(aClient *to, char *pattern, ...) __attribute__((format(printf,2,3)));
 extern void sendto_server(aClient *one, unsigned long caps, unsigned long nocaps, const char *format, ...) __attribute__((format(printf, 4,5)));
+extern void sendto_ops_and_log(char *pattern, ...) __attribute__((format(printf,1,2)));
 
 extern MODVAR int writecalls, writeb[];
 extern int deliver_it(aClient *, char *, int);
@@ -326,14 +328,12 @@ extern void send_umode_out(aClient *, aClient *, long);
 extern void free_client(aClient *);
 extern void free_link(Link *);
 extern void free_ban(Ban *);
-extern void free_class(aClass *);
 extern void free_user(anUser *, aClient *);
 extern int find_str_match_link(Link *, char *);
 extern void free_str_list(Link *);
 extern Link *make_link();
 extern Ban *make_ban();
 extern anUser *make_user(aClient *);
-extern aClass *make_class();
 extern aServer *make_server();
 extern aClient *make_client(aClient *, aClient *);
 extern Link *find_user_link(Link *, aClient *);
@@ -410,15 +410,15 @@ extern MODVAR long SNO_SPAMF;
 extern MODVAR long SNO_OPER;
 
 #ifndef HAVE_STRLCPY
-size_t strlcpy(char *dst, const char *src, size_t size);
+extern size_t strlcpy(char *dst, const char *src, size_t size);
 #endif
 #ifndef HAVE_STRLCAT
-size_t strlcat(char *dst, const char *src, size_t size);
+extern size_t strlcat(char *dst, const char *src, size_t size);
 #endif
 #ifndef HAVE_STRLNCAT
-size_t strlncat(char *dst, const char *src, size_t size, size_t n);
+extern size_t strlncat(char *dst, const char *src, size_t size, size_t n);
 #endif
-
+extern char *strldup(const char *src, size_t n);
 
 extern int dopacket(aClient *, char *, int);
 
@@ -510,7 +510,6 @@ extern void init_random();
 extern u_char getrandom8();
 extern u_int16_t getrandom16();
 extern u_int32_t getrandom32();
-#define EVENT_DRUGS BASE_VERSION
 extern void ident_failed(aClient *cptr);
 
 extern MODVAR char extchmstr[4][64];
@@ -605,7 +604,7 @@ extern void del_async_connects(void);
 extern void make_extbanstr(void);
 extern void isupport_init(void);
 extern void clicap_init(void);
-extern int __attribute__((warn_unused_result)) do_cmd(aClient *cptr, aClient *sptr, char *cmd, int parc, char *parv[]);
+extern int do_cmd(aClient *cptr, aClient *sptr, char *cmd, int parc, char *parv[]);
 extern void create_snomask(aClient *sptr, anUser *user, char *snomask);
 extern MODVAR char *me_hash;
 extern MODVAR int dontspread;
@@ -622,17 +621,16 @@ extern MODVAR int (*register_user)(aClient *cptr, aClient *sptr, char *nick, cha
 extern MODVAR int (*tkl_hash)(unsigned int c);
 extern MODVAR char (*tkl_typetochar)(int type);
 extern MODVAR aTKline *(*tkl_add_line)(int type, char *usermask, char *hostmask, char *reason, char *setby,
-                  TS expire_at, TS set_at, TS spamf_tkl_duration, char *spamf_tkl_reason, MatchType match_type);
+                  TS expire_at, TS set_at, TS spamf_tkl_duration, char *spamf_tkl_reason, MatchType match_type, int soft);
 extern MODVAR aTKline *(*tkl_del_line)(aTKline *tkl);
 extern MODVAR void (*tkl_check_local_remove_shun)(aTKline *tmp);
 extern MODVAR aTKline *(*tkl_expire)(aTKline * tmp);
 extern MODVAR EVENT((*tkl_check_expire));
-extern MODVAR int (*find_tkline_match)(aClient *cptr, int xx);
+extern MODVAR int (*find_tkline_match)(aClient *cptr, int skip_soft);
 extern MODVAR int (*find_shun)(aClient *cptr);
 extern MODVAR int (*find_spamfilter_user)(aClient *sptr, int flags);
 extern MODVAR aTKline *(*find_qline)(aClient *cptr, char *nick, int *ishold);
-extern MODVAR int  (*find_tkline_match_zap)(aClient *cptr);
-extern MODVAR int  (*find_tkline_match_zap_ex)(aClient *cptr, aTKline **rettk);
+extern MODVAR aTKline *(*find_tkline_match_zap)(aClient *cptr);
 extern MODVAR void (*tkl_stats)(aClient *cptr, int type, char *para);
 extern MODVAR void (*tkl_synch)(aClient *sptr);
 extern MODVAR int (*m_tkl)(aClient *cptr, aClient *sptr, int parc, char *parv[]);
@@ -798,3 +796,5 @@ extern void sendbufto_one(aClient *to, char *msg, unsigned int quick);
 extern MODVAR int current_serial;
 extern char *spki_fingerprint(aClient *acptr);
 extern int is_module_loaded(char *name);
+extern void close_std_descriptors(void);
+extern int banned_client(aClient *acptr, char *bantype, char *reason, int global, int noexit);

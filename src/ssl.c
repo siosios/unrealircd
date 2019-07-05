@@ -151,8 +151,8 @@ int  ssl_pem_passwd_cb(char *buf, int size, int rwflag, void *password)
 #endif
 	if (before)
 	{
-		strlcpy(buf, (char *)beforebuf, size);
-		return (strlen(buf));
+		strlcpy(buf, beforebuf, size);
+		return strlen(buf);
 	}
 #ifndef _WIN32
 	pass = getpass("Password for SSL private key: ");
@@ -164,8 +164,8 @@ int  ssl_pem_passwd_cb(char *buf, int size, int rwflag, void *password)
 #endif
 	if (pass)
 	{
-		strlcpy(buf, (char *)pass, size);
-		strlcpy(beforebuf, (char *)pass, sizeof(beforebuf));
+		strlcpy(buf, pass, size);
+		strlcpy(beforebuf, pass, sizeof(beforebuf));
 		before = 1;
 		SSLKeyPasswd = beforebuf;
 		return (strlen(buf));
@@ -361,6 +361,15 @@ SSL_CTX *init_ctx(SSLOptions *ssloptions, int server)
 		goto fail;
 	}
 
+#ifdef SSL_OP_NO_TLSv1_3
+	if (SSL_CTX_set_ciphersuites(ctx, ssloptions->ciphersuites) == 0)
+	{
+		config_warn("Failed to set SSL ciphersuites list");
+		config_report_ssl_error();
+		goto fail;
+	}
+#endif
+
 	if (!cipher_check(ctx, &errstr))
 	{
 		config_warn("There is a problem with your SSL/TLS 'ciphers' configuration setting: %s", errstr);
@@ -385,10 +394,49 @@ SSL_CTX *init_ctx(SSLOptions *ssloptions, int server)
 	if (server)
 	{
 #if defined(SSL_CTX_set_ecdh_auto)
+		/* OpenSSL 1.0.x requires us to explicitly turn this on */
 		SSL_CTX_set_ecdh_auto(ctx, 1);
-#else
+#elif OPENSSL_VERSION_NUMBER < 0x10100000L
+		/* Even older versions require require setting a fixed curve.
+		 * NOTE: Don't be confused by the <1.1.x check.
+		 * Yes, it must be there. Do not remove it!
+		 */
 		SSL_CTX_set_tmp_ecdh(ctx, EC_KEY_new_by_curve_name(NID_X9_62_prime256v1));
+#else
+		/* If we end up here we don't have SSL_CTX_set_ecdh_auto
+		 * and we are on OpenSSL 1.1.0 or later. We don't need to
+		 * do anything then, since auto ecdh is the default.
+		 */
 #endif
+		/* Let's see if we need to (and can) set specific curves */
+		if (ssloptions->ecdh_curves)
+		{
+#ifdef HAS_SSL_CTX_SET1_CURVES_LIST
+			if (!SSL_CTX_set1_curves_list(ctx, ssloptions->ecdh_curves))
+			{
+				config_warn("Failed to apply ecdh-curves '%s'. "
+				            "To get a list of supported curves with the "
+				            "appropriate names, run "
+				            "'openssl ecparam -list_curves' on the server. "
+				            "Separate multiple curves by colon, "
+				            "for example: ecdh-curves \"secp521r1:secp384r1\".",
+				            ssloptions->ecdh_curves);
+				config_report_ssl_error();
+				goto fail;
+			}
+#else
+			/* We try to avoid this in the config code, but better have
+			 * it here too than be sorry if someone screws up:
+			 */
+			config_warn("ecdh-curves specified but not supported by library -- BAD!");
+			config_report_ssl_error();
+			goto fail;
+#endif
+		}
+		/* We really want the ECDHE/ECDHE to be generated per-session.
+		 * Added in 2015 for safety. Seems OpenSSL was smart enough
+		 * to make this the default in 2016 after a security advisory.
+		 */
 		SSL_CTX_set_options(ctx, SSL_OP_SINGLE_ECDH_USE|SSL_OP_SINGLE_DH_USE);
 	}
 
@@ -427,7 +475,10 @@ int init_ssl(void)
 
 void reinit_ssl(aClient *acptr)
 {
-SSL_CTX *tmp;
+	SSL_CTX *tmp;
+	ConfigItem_listen *listen;
+	ConfigItem_sni *sni;
+	ConfigItem_link *link;
 
 	if (!acptr)
 		mylog("Reloading all SSL related data (./unrealircd reloadtls)");
@@ -445,10 +496,7 @@ SSL_CTX *tmp;
 		config_report_ssl_error();
 		return;
 	}
-	/* free and do it for real */
-	SSL_CTX_free(tmp);
-	SSL_CTX_free(ctx_server);
-	ctx_server = init_ctx(iConf.ssl_options, 1);
+	ctx_server = tmp; /* activate */
 	
 	tmp = init_ctx(iConf.ssl_options, 0);
 	if (!tmp)
@@ -457,10 +505,56 @@ SSL_CTX *tmp;
 		config_report_ssl_error();
 		return;
 	}
-	/* free and do it for real */
-	SSL_CTX_free(tmp);
-	SSL_CTX_free(ctx_client);
-	ctx_client = init_ctx(iConf.ssl_options, 0);
+	ctx_client = tmp; /* activate */
+
+	/* listen::ssl-options.... */
+	for (listen = conf_listen; listen; listen = listen->next)
+	{
+		if (listen->ssl_options)
+		{
+			tmp = init_ctx(listen->ssl_options, 1);
+			if (!tmp)
+			{
+				config_error("SSL Reload partially failed. listen::ssl-options error, see above");
+				config_report_ssl_error();
+				return;
+			}
+			listen->ssl_ctx = tmp; /* activate */
+		}
+	}
+
+	/* sni::ssl-options.... */
+	for (sni = conf_sni; sni; sni = sni->next)
+	{
+		if (sni->ssl_options)
+		{
+			tmp = init_ctx(sni->ssl_options, 1);
+			if (!tmp)
+			{
+				config_error("SSL Reload partially failed. sni::ssl-options error, see above");
+				config_report_ssl_error();
+				return;
+			}
+			sni->ssl_ctx = tmp; /* activate */
+		}
+	}
+
+	/* link::outgoing::ssl-options.... */
+	for (link = conf_link; link; link = link->next)
+	{
+		if (link->ssl_options)
+		{
+			tmp = init_ctx(link->ssl_options, 1);
+			if (!tmp)
+			{
+				config_error("SSL Reload partially failed. link::outgoing::ssl-options error in link %s { }, see above",
+					link->servername);
+				config_report_ssl_error();
+				return;
+			}
+			link->ssl_ctx = tmp; /* activate */
+		}
+	}
 }
 
 #define CHK_NULL(x) if ((x)==NULL) {\
@@ -527,11 +621,6 @@ char *ssl_get_cipher(SSL *ssl)
 	strlcpy(buf, SSL_get_version(ssl), sizeof(buf));
 	strlcat(buf, "-", sizeof(buf));
 	strlcat(buf, SSL_get_cipher(ssl), sizeof(buf));
-	c = SSL_get_current_cipher(ssl);
-	SSL_CIPHER_get_bits(c, &bits);
-	strlcat(buf, "-", sizeof(buf));
-	strlcat(buf, my_itoa(bits), sizeof(buf));
-	strlcat(buf, "bits", sizeof(buf));
 
 	return buf;
 }
@@ -1028,27 +1117,30 @@ int cipher_check(SSL_CTX *ctx, char **errstr)
 		if (strstr(cipher, "DES-"))
 		{
 			snprintf(errbuf, sizeof(errbuf), "DES is enabled but is a weak cipher");
+			SSL_free(ssl);
 			return 0;
 		}
 		else if (strstr(cipher, "3DES-"))
 		{
 			snprintf(errbuf, sizeof(errbuf), "3DES is enabled but is a weak cipher");
+			SSL_free(ssl);
 			return 0;
 		}
 		else if (strstr(cipher, "RC4-"))
 		{
 			snprintf(errbuf, sizeof(errbuf), "RC4 is enabled but is a weak cipher");
+			SSL_free(ssl);
 			return 0;
 		}
 		else if (strstr(cipher, "NULL-"))
 		{
 			snprintf(errbuf, sizeof(errbuf), "NULL cipher provides no encryption");
+			SSL_free(ssl);
 			return 0;
 		}
 	}
 
 	SSL_free(ssl);
-
 	return 1;
 }
 

@@ -1,7 +1,6 @@
 rem Build script for appveyor
 
 rem Initialize Visual Studio variables
-if "%TARGET%" == "Visual Studio 2012" call "C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\vcvarsall.bat" x86
 if "%TARGET%" == "Visual Studio 2017" call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars32.bat"
 
 rem Installing tools
@@ -16,8 +15,8 @@ cd \projects
 mkdir unrealircd-deps
 cd unrealircd-deps
 wget https://www.unrealircd.org/files/dev/win/SetACL.exe
-wget https://www.unrealircd.org/files/dev/win/libs/unrealircd-libraries-4.0.16.zip
-unzip unrealircd-libraries-4.0.16.zip
+wget https://www.unrealircd.org/files/dev/win/libs/unrealircd-libraries-devel.zip
+unzip unrealircd-libraries-devel.zip
 
 cd \projects\unrealircd
 

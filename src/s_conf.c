@@ -92,6 +92,8 @@ static int	_conf_deny_dcc		(ConfigFile *conf, ConfigEntry *ce);
 static int	_conf_deny_link		(ConfigFile *conf, ConfigEntry *ce);
 static int	_conf_deny_channel	(ConfigFile *conf, ConfigEntry *ce);
 static int	_conf_deny_version	(ConfigFile *conf, ConfigEntry *ce);
+static int	_conf_require		(ConfigFile *conf, ConfigEntry *ce);
+static int	_conf_require_sasl	(ConfigFile *conf, ConfigEntry *ce);
 static int	_conf_allow_channel	(ConfigFile *conf, ConfigEntry *ce);
 static int	_conf_allow_dcc		(ConfigFile *conf, ConfigEntry *ce);
 static int	_conf_loadmodule	(ConfigFile *conf, ConfigEntry *ce);
@@ -122,11 +124,13 @@ static int	_test_except		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_vhost		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_link		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_ban		(ConfigFile *conf, ConfigEntry *ce);
+static int	_test_require		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_set		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_deny		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_allow_channel	(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_allow_dcc		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_loadmodule	(ConfigFile *conf, ConfigEntry *ce);
+static int	_test_blacklist_module	(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_log		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_alias		(ConfigFile *conf, ConfigEntry *ce);
 static int	_test_help		(ConfigFile *conf, ConfigEntry *ce);
@@ -140,6 +144,7 @@ static ConfigCommand _ConfigCommands[] = {
 	{ "alias",		_conf_alias,		_test_alias	},
 	{ "allow",		_conf_allow,		_test_allow	},
 	{ "ban", 		_conf_ban,		_test_ban	},
+	{ "blacklist-module",	NULL,		 	NULL },
 	{ "class", 		_conf_class,		_test_class	},
 	{ "deny",		_conf_deny,		_test_deny	},
 	{ "drpass",		_conf_drpass,		_test_drpass	},
@@ -155,6 +160,7 @@ static ConfigCommand _ConfigCommands[] = {
 	{ "official-channels", 		_conf_offchans,		_test_offchans	},
 	{ "oper", 		_conf_oper,		_test_oper	},
 	{ "operclass",		_conf_operclass,	_test_operclass	},
+	{ "require", 		_conf_require,		_test_require	},
 	{ "set",		_conf_set,		_test_set	},
 	{ "sni",		_conf_sni,		_test_sni	},
 	{ "spamfilter",	_conf_spamfilter,	_test_spamfilter	},
@@ -299,6 +305,7 @@ ConfigItem_deny_version *conf_deny_version = NULL;
 ConfigItem_log		*conf_log = NULL;
 ConfigItem_alias	*conf_alias = NULL;
 ConfigItem_include	*conf_include = NULL;
+ConfigItem_blacklist_module	*conf_blacklist_module = NULL;
 ConfigItem_help		*conf_help = NULL;
 ConfigItem_offchans	*conf_offchans = NULL;
 
@@ -325,6 +332,7 @@ void unload_notloaded_includes(void);
 void load_includes(void);
 void unload_loaded_includes(void);
 int rehash_internal(aClient *cptr, aClient *sptr, int sig);
+int is_blacklisted_module(char *name);
 
 /** Return the printable string of a 'cep' location, such as set::something::xyz */
 char *config_var(ConfigEntry *cep)
@@ -782,7 +790,7 @@ ConfigFile *config_load(char *filename)
 		close(fd);
 		return cfptr;
 	}
-	buf = MyMalloc(sb.st_size+1);
+	buf = MyMallocEx(sb.st_size+1);
 	if (buf == NULL)
 	{
 		config_error("Out of memory trying to load \"%s\"\n", filename);
@@ -857,8 +865,7 @@ static ConfigFile *config_parse(char *filename, char *confdata)
 	ConfigFile	*curcf;
 	ConfigFile	*lastcf;
 
-	lastcf = curcf = MyMalloc(sizeof(ConfigFile));
-	memset(curcf, 0, sizeof(ConfigFile));
+	lastcf = curcf = MyMallocEx(sizeof(ConfigFile));
 	curcf->cf_filename = strdup(filename);
 	lastce = &(curcf->cf_entries);
 	curce = NULL;
@@ -1037,16 +1044,15 @@ static ConfigFile *config_parse(char *filename, char *confdata)
 					}
 					else
 					{
-						curce->ce_vardata = MyMalloc(ptr-start+1);
+						curce->ce_vardata = MyMallocEx(ptr-start+1);
 						strlcpy(curce->ce_vardata, start, ptr-start+1);
 						unreal_delquotes(curce->ce_vardata);
 					}
 				}
 				else
 				{
-					curce = MyMalloc(sizeof(ConfigEntry));
-					memset(curce, 0, sizeof(ConfigEntry));
-					curce->ce_varname = MyMalloc((ptr-start)+1);
+					curce = MyMallocEx(sizeof(ConfigEntry));
+					curce->ce_varname = MyMallocEx((ptr-start)+1);
 					strlcpy(curce->ce_varname, start, ptr-start+1);
 					unreal_delquotes(curce->ce_varname);
 					curce->ce_varlinenum = linenumber;
@@ -1105,15 +1111,15 @@ static ConfigFile *config_parse(char *filename, char *confdata)
 					}
 					else
 					{
-						curce->ce_vardata = MyMalloc(ptr-start+1);
+						curce->ce_vardata = MyMallocEx(ptr-start+1);
 						strlcpy(curce->ce_vardata, start, ptr-start+1);
 					}
 				}
 				else
 				{
-					curce = MyMalloc(sizeof(ConfigEntry));
+					curce = MyMallocEx(sizeof(ConfigEntry));
 					memset(curce, 0, sizeof(ConfigEntry));
-					curce->ce_varname = MyMalloc((ptr-start)+1);
+					curce->ce_varname = MyMallocEx((ptr-start)+1);
 					strlcpy(curce->ce_varname, start, ptr-start+1);
 					curce->ce_varlinenum = linenumber;
 					curce->ce_fileptr = curcf;
@@ -1478,9 +1484,9 @@ void config_setdefaultsettings(aConfiguration *i)
 	i->check_target_nick_bans = 1;
 	i->maxbans = 60;
 	i->maxbanlength = 2048;
-	i->timesynch_enabled = 1;
+	i->timesynch_enabled = 0;
 	i->timesynch_timeout = 3;
-	i->timesynch_server = strdup("193.67.79.202,192.43.244.18,128.250.36.3"); /* nlnet (EU), NIST (US), uni melbourne (AU). All open acces, nonotify, nodns. */
+	i->timesynch_server = strdup("193.67.79.202,129.6.15.29,133.100.11.8"); /* nlnet (EU), NIST (US), Fukuoka university (JP). All open acces, nonotify, nodns. */
 	i->level_on_join = CHFL_CHANOP;
 	i->watch_away_notification = 1;
 	i->new_linking_protocol = 1;
@@ -1507,7 +1513,11 @@ void config_setdefaultsettings(aConfiguration *i)
 	snprintf(tmp, sizeof(tmp), "%s/ssl/curl-ca-bundle.crt", CONFDIR);
 	i->ssl_options->trusted_ca_file = strdup(tmp);
 	i->ssl_options->ciphers = strdup(UNREALIRCD_DEFAULT_CIPHERS);
+	i->ssl_options->ciphersuites = strdup(UNREALIRCD_DEFAULT_CIPHERSUITES);
 	i->ssl_options->protocols = SSL_PROTOCOL_ALL;
+#ifdef HAS_SSL_CTX_SET1_CURVES_LIST
+	i->ssl_options->ecdh_curves = strdup(UNREALIRCD_DEFAULT_ECDH_CURVES);
+#endif
 
 	i->plaintext_policy_user = PLAINTEXT_POLICY_ALLOW;
 	i->plaintext_policy_oper = PLAINTEXT_POLICY_WARN;
@@ -1712,6 +1722,50 @@ int config_test_all(void)
 	return 1;
 }
 
+/** Process all loadmodule directives in all includes.
+ * This was previously done at the same time as 'include' was called but
+ * that was too early now that we have blacklist-module, so moved here.
+ * @retval 1 on success, 0 on any failed loadmodule directive.
+ */
+int config_loadmodules(void)
+{
+	ConfigFile *cfptr;
+	ConfigEntry *ce;
+	ConfigItem_blacklist_module *blm, *blm_next;
+
+	int fatal_ret = 0, ret;
+
+	for (cfptr = conf; cfptr; cfptr = cfptr->cf_next)
+	{
+		if (config_verbose > 1)
+			config_status("Testing %s", cfptr->cf_filename);
+		for (ce = cfptr->cf_entries; ce; ce = ce->ce_next)
+		{
+			if (!strcmp(ce->ce_varname, "loadmodule"))
+			{
+				ret = _conf_loadmodule(cfptr, ce);
+				if (ret < fatal_ret)
+					fatal_ret = ret; /* lowest wins */
+			}
+		}
+	}
+
+	/* Let's free the blacklist-module list here as well */
+	for (blm = conf_blacklist_module; blm; blm = blm_next)
+	{
+		blm_next = blm->next;
+		safefree(blm->name);
+		safefree(blm);
+	}
+	conf_blacklist_module = NULL;
+	/* End of freeing code */
+
+	/* If any loadmodule returned a fatal (-1) error code then we return fail status (0) */
+	if (fatal_ret < 0)
+		return 0; /* FAIL */
+	return 1; /* SUCCESS */
+}
+
 int	init_conf(char *rootconf, int rehash)
 {
 	char *old_pid_file = NULL;
@@ -1736,7 +1790,7 @@ int	init_conf(char *rootconf, int rehash)
 	 * include "unrealircd.conf";
 	 */
 	add_include(rootconf, "[thin air]", -1);
-	if (load_conf(rootconf, rootconf) > 0)
+	if ((load_conf(rootconf, rootconf) > 0) && config_loadmodules())
 	{
 		config_test_reset();
 		if (!config_test_all())
@@ -1848,7 +1902,6 @@ int	load_conf(char *filename, const char *original_path)
 	ConfigEntry 	*ce;
 	ConfigItem_include *inc, *my_inc;
 	int ret;
-	int fatal_ret;
 	int counter;
 
 	if (config_verbose > 0)
@@ -1863,7 +1916,7 @@ int	load_conf(char *filename, const char *original_path)
 	 */
 	counter = 0;
 	my_inc = NULL;
-	for (inc = conf_include; inc; inc = (ConfigItem_include *)inc->next)
+	for (inc = conf_include; inc; inc = inc->next)
 	{
 		/*
 		 * ignore files which were part of a _previous_
@@ -1924,23 +1977,18 @@ int	load_conf(char *filename, const char *original_path)
 			cfptr3 = &cfptr2->cf_next;
 		*cfptr3 = cfptr;
 
+		if (config_verbose > 1)
+			config_status("Loading module blacklist in %s", filename);
+
+		for (ce = cfptr->cf_entries; ce; ce = ce->ce_next)
+			if (!strcmp(ce->ce_varname, "blacklist-module"))
+				 _test_blacklist_module(cfptr, ce);
+
 		/* Load modules */
 		if (config_verbose > 1)
 			config_status("Loading modules in %s", filename);
-
-		fatal_ret = 0;
-		for (ce = cfptr->cf_entries; ce; ce = ce->ce_next)
-			if (!strcmp(ce->ce_varname, "loadmodule"))
-			{
-				 ret = _conf_loadmodule(cfptr, ce);
-				 if (ret < fatal_ret)
-				 	fatal_ret = ret; /* lowest wins */
-			}
-		ret = fatal_ret;
 		if (need_34_upgrade)
 			upgrade_conf_to_34();
-		if (ret < 0)
-			return ret;
 
 		/* Load includes */
 		if (config_verbose > 1)
@@ -2442,7 +2490,7 @@ int	config_run()
 	 * this stack up here, perhaps this shoul be moved to another
 	 * function.
 	 */
-	for(allow = conf_allow; allow; allow = (ConfigItem_allow *)allow->next)
+	for(allow = conf_allow; allow; allow = allow->next)
 		if(!allow->ipv6_clone_mask)
 			allow->ipv6_clone_mask = tempiConf.default_ipv6_clone_mask;
 
@@ -2591,43 +2639,45 @@ int	config_test()
 
 ConfigItem_deny_dcc	*Find_deny_dcc(char *name)
 {
-	ConfigItem_deny_dcc	*p;
+	ConfigItem_deny_dcc	*e;
 
 	if (!name)
 		return NULL;
 
-	for (p = conf_deny_dcc; p; p = (ConfigItem_deny_dcc *) p->next)
+	for (e = conf_deny_dcc; e; e = e->next)
 	{
-		if (!match(name, p->filename))
-			return (p);
+		if (!match(name, e->filename))
+			return e;
 	}
 	return NULL;
 }
 
-ConfigItem_alias *Find_alias(char *name) {
-	ConfigItem_alias *alias;
-
-	if (!name)
-		return NULL;
-
-	for (alias = conf_alias; alias; alias = (ConfigItem_alias *)alias->next) {
-		if (!stricmp(alias->alias, name))
-			return alias;
-	}
-	return NULL;
-}
-
-ConfigItem_class	*Find_class(char *name)
+ConfigItem_alias *Find_alias(char *name)
 {
-	ConfigItem_class	*p;
+	ConfigItem_alias *e;
 
 	if (!name)
 		return NULL;
 
-	for (p = conf_class; p; p = (ConfigItem_class *) p->next)
+	for (e = conf_alias; e; e = e->next)
 	{
-		if (!strcmp(name, p->name))
-			return (p);
+		if (!stricmp(e->alias, name))
+			return e;
+	}
+	return NULL;
+}
+
+ConfigItem_class *Find_class(char *name)
+{
+	ConfigItem_class *e;
+
+	if (!name)
+		return NULL;
+
+	for (e = conf_class; e; e = e->next)
+	{
+		if (!strcmp(name, e->name))
+			return e;
 	}
 	return NULL;
 }
@@ -2635,29 +2685,30 @@ ConfigItem_class	*Find_class(char *name)
 
 ConfigItem_oper	*Find_oper(char *name)
 {
-	ConfigItem_oper	*p;
+	ConfigItem_oper	*e;
 
 	if (!name)
 		return NULL;
 
-	for (p = conf_oper; p; p = (ConfigItem_oper *) p->next)
+	for (e = conf_oper; e; e = e->next)
 	{
-		if (!strcmp(name, p->name))
-			return (p);
+		if (!strcmp(name, e->name))
+			return e;
 	}
 	return NULL;
 }
 
 ConfigItem_operclass *Find_operclass(char *name)
 {
-	ConfigItem_operclass *p;
+	ConfigItem_operclass *e;
+
 	if (!name)
 		return NULL;
 
-	for (p = conf_operclass; p; p= (ConfigItem_operclass *) p->next)
+	for (e = conf_operclass; e; e = e->next)
 	{
-		if (!strcmp(name,p->classStruct->name))
-			return (p);
+		if (!strcmp(name,e->classStruct->name))
+			return e;
 	}
 	return NULL;
 }
@@ -2678,26 +2729,27 @@ int count_oper_sessions(char *name)
 
 ConfigItem_listen *Find_listen(char *ipmask, int port, int ipv6)
 {
-	ConfigItem_listen *p;
+	ConfigItem_listen *e;
 
 	if (!ipmask)
 		return NULL;
 
-	for (p = conf_listen; p; p = p->next)
+	for (e = conf_listen; e; e = e->next)
 	{
-		if (p->ipv6 != ipv6)
+		if (e->ipv6 != ipv6)
 			continue;
 
-		if (!match(p->ip, ipmask) && (port == p->port))
-			return (p);
+		if (!match(e->ip, ipmask) && (port == e->port))
+			return e;
 
-		if (!match(ipmask, p->ip) && (port == p->port))
-			return (p);
+		if (!match(ipmask, e->ip) && (port == e->port))
+			return e;
 	}
+
 	return NULL;
 }
 
-/** Find a SNI match.
+/** Find an SNI match.
  * @param name The hostname to look for (eg: irc.xyz.com).
  */
 ConfigItem_sni *Find_sni(char *name)
@@ -2715,13 +2767,15 @@ ConfigItem_sni *Find_sni(char *name)
 	return NULL;
 }
 
-ConfigItem_ulines *Find_uline(char *host) {
+ConfigItem_ulines *Find_uline(char *host)
+{
 	ConfigItem_ulines *ulines;
 
 	if (!host)
 		return NULL;
 
-	for(ulines = conf_ulines; ulines; ulines =(ConfigItem_ulines *) ulines->next) {
+	for(ulines = conf_ulines; ulines; ulines = ulines->next)
+	{
 		if (!stricmp(host, ulines->servername))
 			return ulines;
 	}
@@ -2733,7 +2787,7 @@ ConfigItem_except *Find_except(aClient *sptr, short type)
 {
 	ConfigItem_except *excepts;
 
-	for(excepts = conf_except; excepts; excepts =(ConfigItem_except *) excepts->next)
+	for(excepts = conf_except; excepts; excepts = excepts->next)
 	{
 		if (excepts->flag.type == type)
 		{
@@ -2748,11 +2802,11 @@ ConfigItem_tld *Find_tld(aClient *cptr)
 {
 	ConfigItem_tld *tld;
 
-	for (tld = conf_tld; tld; tld = (ConfigItem_tld *) tld->next)
+	for (tld = conf_tld; tld; tld = tld->next)
 	{
 		if (match_user(tld->mask, cptr, MATCH_CHECK_REAL))
 		{
-			if ((tld->options & TLD_SSL) && !IsSecure(cptr))
+			if ((tld->options & TLD_SSL) && !IsSecureConnect(cptr))
 				continue;
 			if ((tld->options & TLD_REMOTE) && MyClient(cptr))
 				continue;
@@ -2768,7 +2822,7 @@ ConfigItem_link *Find_link(char *servername, aClient *acptr)
 {
 	ConfigItem_link	*link;
 
-	for (link = conf_link; link; link = (ConfigItem_link *)link->next)
+	for (link = conf_link; link; link = link->next)
 	{
 		if (!match(link->servername, servername) && unreal_mask_match(acptr, link->incoming.mask))
 		{
@@ -2787,7 +2841,7 @@ ConfigItem_ban 	*Find_ban(aClient *sptr, char *host, short type)
 	 * don't need to be searched -- codemastr
 	 */
 
-	for (ban = conf_ban; ban; ban = (ConfigItem_ban *) ban->next)
+	for (ban = conf_ban; ban; ban = ban->next)
 	{
 		if (ban->flag.type == type)
 		{
@@ -2818,7 +2872,7 @@ ConfigItem_ban 	*Find_banEx(aClient *sptr, char *host, short type, short type2)
 	 * don't need to be searched -- codemastr
 	 */
 
-	for (ban = conf_ban; ban; ban = (ConfigItem_ban *) ban->next)
+	for (ban = conf_ban; ban; ban = ban->next)
 	{
 		if ((ban->flag.type == type) && (ban->flag.type2 == type2))
 		{
@@ -2839,13 +2893,16 @@ ConfigItem_ban 	*Find_banEx(aClient *sptr, char *host, short type, short type2)
 	return NULL;
 }
 
-ConfigItem_vhost *Find_vhost(char *name) {
+ConfigItem_vhost *Find_vhost(char *name)
+{
 	ConfigItem_vhost *vhost;
 
-	for (vhost = conf_vhost; vhost; vhost = (ConfigItem_vhost *)vhost->next) {
+	for (vhost = conf_vhost; vhost; vhost = vhost->next)
+	{
 		if (!strcmp(name, vhost->login))
 			return vhost;
 	}
+
 	return NULL;
 }
 
@@ -2856,7 +2913,7 @@ ConfigItem_deny_channel *Find_channel_allowed(aClient *cptr, char *name)
 	ConfigItem_deny_channel *dchannel;
 	ConfigItem_allow_channel *achannel;
 
-	for (dchannel = conf_deny_channel; dchannel; dchannel = (ConfigItem_deny_channel *)dchannel->next)
+	for (dchannel = conf_deny_channel; dchannel; dchannel = dchannel->next)
 	{
 		if (!match(dchannel->channel, name))
 		{
@@ -2871,7 +2928,7 @@ ConfigItem_deny_channel *Find_channel_allowed(aClient *cptr, char *name)
 	if (dchannel)
 	{
 		/* Check exceptions... ('allow channel') */
-		for (achannel = conf_allow_channel; achannel; achannel = (ConfigItem_allow_channel *)achannel->next)
+		for (achannel = conf_allow_channel; achannel; achannel = achannel->next)
 		{
 			if (!match(achannel->channel, name))
 			{
@@ -3014,7 +3071,7 @@ int	_conf_include(ConfigFile *conf, ConfigEntry *ce)
 		return -1;
 	}
 	if (cPath) {
-		path = MyMalloc(strlen(cPath) + strlen(FindData.cFileName)+1);
+		path = MyMallocEx(strlen(cPath) + strlen(FindData.cFileName)+1);
 		strcpy(path, cPath);
 		strcat(path, FindData.cFileName);
 
@@ -3037,7 +3094,7 @@ int	_conf_include(ConfigFile *conf, ConfigEntry *ce)
 	ret = 0;
 	while (FindNextFile(hFind, &FindData) != 0) {
 		if (cPath) {
-			path = MyMalloc(strlen(cPath) + strlen(FindData.cFileName)+1);
+			path = MyMallocEx(strlen(cPath) + strlen(FindData.cFileName)+1);
 			strcpy(path,cPath);
 			strcat(path,FindData.cFileName);
 
@@ -5123,6 +5180,15 @@ int	_test_allow(ConfigFile *conf, ConfigEntry *ce)
 				{}
 				else if (!strcmp(cepp->ce_varname, "ssl"))
 				{}
+				else if (!strcmp(cepp->ce_varname, "sasl"))
+				{
+					config_error("%s:%d: The option allow::options::sasl no longer exists. "
+					             "Please use a require sasl { } block instead, which "
+					             "is more flexible and provides the same functionality. See "
+					             "https://www.unrealircd.org/docs/Require_sasl_block",
+					             cepp->ce_fileptr->cf_filename, cepp->ce_varlinenum);
+					errors++;
+				}
 				else if (!strcmp(cepp->ce_varname, "nopasscont"))
 				{}
 				else
@@ -6445,7 +6511,7 @@ int	_conf_link(ConfigFile *conf, ConfigEntry *ce)
 	ConfigItem_link *link = NULL;
 	NameValue *ofp;
 
-	link = (ConfigItem_link *) MyMallocEx(sizeof(ConfigItem_link));
+	link = MyMallocEx(sizeof(ConfigItem_link));
 	link->servername = strdup(ce->ce_vardata);
 
 	for (cep = ce->ce_entries; cep; cep = cep->ce_next)
@@ -7008,6 +7074,141 @@ int     _test_ban(ConfigFile *conf, ConfigEntry *ce)
 	return errors;
 }
 
+int _conf_require(ConfigFile *conf, ConfigEntry *ce)
+{
+	ConfigEntry *cep;
+	ConfigItem_ban *ca;
+	Hook *h;
+
+	ca = MyMallocEx(sizeof(ConfigItem_ban));
+	if (!strcmp(ce->ce_vardata, "sasl"))
+	{
+		ca->flag.type = CONF_BAN_UNAUTHENTICATED;
+	}
+	else {
+		int value;
+		free(ca); /* ca isn't used, modules have their own list. */
+		for (h = Hooks[HOOKTYPE_CONFIGRUN]; h; h = h->next)
+		{
+			value = (*(h->func.intfunc))(conf,ce,CONFIG_REQUIRE);
+			if (value == 1)
+				break;
+		}
+		return 0;
+	}
+	for (cep = ce->ce_entries; cep; cep = cep->ce_next)
+	{
+		if (!strcmp(cep->ce_varname, "mask"))
+		{
+			ca->mask = strdup(cep->ce_vardata);
+		}
+		else if (!strcmp(cep->ce_varname, "reason"))
+			ca->reason = strdup(cep->ce_vardata);
+		else if (!strcmp(cep->ce_varname, "action"))
+			ca ->action = banact_stringtoval(cep->ce_vardata);
+	}
+	AddListItem(ca, conf_ban);
+	return 0;
+}
+
+int _test_require(ConfigFile *conf, ConfigEntry *ce)
+{
+	ConfigEntry *cep;
+	int errors = 0;
+	Hook *h;
+	char type = 0;
+	char has_mask = 0, has_action = 0, has_reason = 0;
+
+	if (!ce->ce_vardata)
+	{
+		config_error("%s:%i: require without type, did you mean 'require sasl'?",
+			ce->ce_fileptr->cf_filename, ce->ce_varlinenum);
+		return 1;
+	}
+	if (!strcmp(ce->ce_vardata, "sasl"))
+	{}
+	else
+	{
+		int used = 0;
+		for (h = Hooks[HOOKTYPE_CONFIGTEST]; h; h = h->next)
+		{
+			int value, errs = 0;
+			if (h->owner && !(h->owner->flags & MODFLAG_TESTING)
+			    && !(h->owner->options & MOD_OPT_PERM))
+				continue;
+			value = (*(h->func.intfunc))(conf,ce,CONFIG_REQUIRE, &errs);
+			if (value == 2)
+				used = 1;
+			if (value == 1)
+			{
+				used = 1;
+				break;
+			}
+			if (value == -1)
+			{
+				used = 1;
+				errors += errs;
+				break;
+			}
+			if (value == -2)
+			{
+				used = 1;
+				errors += errs;
+			}
+		}
+		if (!used) {
+			config_error("%s:%i: unknown require type '%s'",
+				ce->ce_fileptr->cf_filename, ce->ce_varlinenum,
+				ce->ce_vardata);
+			return 1;
+		}
+		return errors;
+	}
+
+	for (cep = ce->ce_entries; cep; cep = cep->ce_next)
+	{
+		if (config_is_blankorempty(cep, "require"))
+		{
+			errors++;
+			continue;
+		}
+		if (!strcmp(cep->ce_varname, "mask"))
+		{
+			if (has_mask)
+			{
+				config_warn_duplicate(cep->ce_fileptr->cf_filename,
+					cep->ce_varlinenum, "require::mask");
+				continue;
+			}
+			has_mask = 1;
+		}
+		else if (!strcmp(cep->ce_varname, "reason"))
+		{
+			if (has_reason)
+			{
+				config_warn_duplicate(cep->ce_fileptr->cf_filename,
+					cep->ce_varlinenum, "require::reason");
+				continue;
+			}
+			has_reason = 1;
+		}
+	}
+
+	if (!has_mask)
+	{
+		config_error_missing(ce->ce_fileptr->cf_filename, ce->ce_varlinenum,
+			"require::mask");
+		errors++;
+	}
+	if (!has_reason)
+	{
+		config_error_missing(ce->ce_fileptr->cf_filename, ce->ce_varlinenum,
+			"require::reason");
+		errors++;
+	}
+	return errors;
+}
+
 #define CheckNull(x) if ((!(x)->ce_vardata) || (!(*((x)->ce_vardata)))) { config_error("%s:%i: missing parameter", (x)->ce_fileptr->cf_filename, (x)->ce_varlinenum); errors++; continue; }
 #define CheckNullAllowEmpty(x) if ((!(x)->ce_vardata)) { config_error("%s:%i: missing parameter", (x)->ce_fileptr->cf_filename, (x)->ce_varlinenum); errors++; continue; }
 #define CheckDuplicate(cep, name, display) if (settings.has_##name) { config_warn_duplicate((cep)->ce_fileptr->cf_filename, cep->ce_varlinenum, "set::" display); continue; } else settings.has_##name = 1
@@ -7028,6 +7229,21 @@ void test_sslblock(ConfigFile *conf, ConfigEntry *cep, int *totalerrors)
 		else if (!strcmp(cepp->ce_varname, "ciphers") || !strcmp(cepp->ce_varname, "server-cipher-list"))
 		{
 			CheckNull(cepp);
+		}
+		else if (!strcmp(cepp->ce_varname, "ciphersuites"))
+		{
+			CheckNull(cepp);
+		}
+		else if (!strcmp(cepp->ce_varname, "ecdh-curves"))
+		{
+			CheckNull(cepp);
+#ifndef HAS_SSL_CTX_SET1_CURVES_LIST
+			config_error("ecdh-curves specified but your OpenSSL/LibreSSL library does not "
+			             "support setting curves manually by name. Either upgrade to a "
+			             "newer library version or remove the 'ecdh-curves' directive "
+			             "from your configuration file");
+			errors++;
+#endif
 		}
 		else if (!strcmp(cepp->ce_varname, "protocols"))
 		{
@@ -7188,6 +7404,7 @@ void free_ssl_options(SSLOptions *ssloptions)
 	safefree(ssloptions->dh_file);
 	safefree(ssloptions->trusted_ca_file);
 	safefree(ssloptions->ciphers);
+	safefree(ssloptions->ciphersuites);
 	memset(ssloptions, 0, sizeof(SSLOptions));
 	MyFree(ssloptions);
 }
@@ -7206,6 +7423,8 @@ void conf_sslblock(ConfigFile *conf, ConfigEntry *cep, SSLOptions *ssloptions)
 		safestrdup(ssloptions->trusted_ca_file, tempiConf.ssl_options->trusted_ca_file);
 		ssloptions->protocols = tempiConf.ssl_options->protocols;
 		safestrdup(ssloptions->ciphers, tempiConf.ssl_options->ciphers);
+		safestrdup(ssloptions->ciphersuites, tempiConf.ssl_options->ciphersuites);
+		safestrdup(ssloptions->ecdh_curves, tempiConf.ssl_options->ecdh_curves);
 		ssloptions->options = tempiConf.ssl_options->options;
 		ssloptions->renegotiate_bytes = tempiConf.ssl_options->renegotiate_bytes;
 		ssloptions->renegotiate_timeout = tempiConf.ssl_options->renegotiate_timeout;
@@ -7220,6 +7439,14 @@ void conf_sslblock(ConfigFile *conf, ConfigEntry *cep, SSLOptions *ssloptions)
 		if (!strcmp(cepp->ce_varname, "ciphers") || !strcmp(cepp->ce_varname, "server-cipher-list"))
 		{
 			safestrdup(ssloptions->ciphers, cepp->ce_vardata);
+		}
+		else if (!strcmp(cepp->ce_varname, "ciphersuites"))
+		{
+			safestrdup(ssloptions->ciphersuites, cepp->ce_vardata);
+		}
+		else if (!strcmp(cepp->ce_varname, "ecdh-curves"))
+		{
+			safestrdup(ssloptions->ecdh_curves, cepp->ce_vardata);
 		}
 		else if (!strcmp(cepp->ce_varname, "protocols"))
 		{
@@ -7402,7 +7629,7 @@ int	_conf_set(ConfigFile *conf, ConfigEntry *ce)
 		}
 		else if (!strcmp(cep->ce_varname, "restrict-usermodes")) {
 			int i;
-			char *p = MyMalloc(strlen(cep->ce_vardata) + 1), *x = p;
+			char *p = MyMallocEx(strlen(cep->ce_vardata) + 1), *x = p;
 			/* The data should be something like 'Gw' or something,
 			 * but just in case users use '+Gw' then ignore the + (and -).
 			 */
@@ -7414,7 +7641,7 @@ int	_conf_set(ConfigFile *conf, ConfigEntry *ce)
 		}
 		else if (!strcmp(cep->ce_varname, "restrict-channelmodes")) {
 			int i;
-			char *p = MyMalloc(strlen(cep->ce_vardata) + 1), *x = p;
+			char *p = MyMallocEx(strlen(cep->ce_vardata) + 1), *x = p;
 			/* The data should be something like 'GL' or something,
 			 * but just in case users use '+GL' then ignore the + (and -).
 			 */
@@ -8067,6 +8294,7 @@ int	_test_set(ConfigFile *conf, ConfigEntry *ce)
 			CheckDuplicate(cep, prefix_quit, "prefix-quit");
 		}
 		else if (!strcmp(cep->ce_varname, "hide-ban-reason")) {
+			CheckNull(cep);
 			CheckDuplicate(cep, hide_ban_reason, "hide-ban-reason");
 		}
 		else if (!strcmp(cep->ce_varname, "restrict-usermodes"))
@@ -8773,6 +9001,14 @@ int	_conf_loadmodule(ConfigFile *conf, ConfigEntry *ce)
 		// TODO ^: silly win32 wrapping prevents this from being displayed otherwise. PLZ FIX! !
 		/* let it continue to load anyway? */
 	}
+
+	if (is_blacklisted_module(ce->ce_vardata))
+	{
+		/* config_warn("%s:%i: Module '%s' is blacklisted, not loading",
+			ce->ce_fileptr->cf_filename, ce->ce_varlinenum, ce->ce_vardata); */
+		return 1;
+	}
+
 	if ((ret = Module_Create(ce->ce_vardata))) {
 		config_status("%s:%i: loadmodule %s: failed to load: %s",
 			ce->ce_fileptr->cf_filename, ce->ce_varlinenum,
@@ -8784,6 +9020,53 @@ int	_conf_loadmodule(ConfigFile *conf, ConfigEntry *ce)
 
 int	_test_loadmodule(ConfigFile *conf, ConfigEntry *ce)
 {
+	return 0;
+}
+
+int	_test_blacklist_module(ConfigFile *conf, ConfigEntry *ce)
+{
+	char *path;
+	ConfigItem_blacklist_module *m;
+
+	if (!ce->ce_vardata)
+	{
+		config_status("%s:%i: blacklist-module: no module name given to blacklist",
+			ce->ce_fileptr->cf_filename, ce->ce_varlinenum);
+		return -1;
+	}
+
+	path = Module_TransformPath(ce->ce_vardata);
+
+	/* Is it a good idea to warn about this?
+	 * Yes, the user may have made a typo, thinking (s)he blacklisted something
+	 *      but due to the typo the blacklist-module is not effective.
+	 *  No, the user may have blacklisted a bunch of modules of which not all may
+	 *      be installed at the time.
+	 * Hmmmmmm.
+	 */
+	if (!file_exists(path))
+	{
+		config_warn("%s:%i: blacklist-module for '%s' but module does not exist anyway",
+			ce->ce_fileptr->cf_filename, ce->ce_varlinenum, ce->ce_vardata);
+		/* fallthrough */
+	}
+
+	m = MyMallocEx(sizeof(ConfigItem_blacklist_module));
+	m->name = strdup(ce->ce_vardata);
+	AddListItem(m, conf_blacklist_module);
+
+	return 0;
+}
+
+int is_blacklisted_module(char *name)
+{
+	char *path = Module_TransformPath(name);
+	ConfigItem_blacklist_module *m;
+
+	for (m = conf_blacklist_module; m; m = m->next)
+		if (!stricmp(m->name, name) || !stricmp(m->name, path))
+			return 1;
+
 	return 0;
 }
 
@@ -9721,6 +10004,7 @@ int     _test_deny(ConfigFile *conf, ConfigEntry *ce)
 static void conf_download_complete(const char *url, const char *file, const char *errorbuf, int cached, void *inc_key)
 {
 	ConfigItem_include *inc;
+
 	if (!loop.ircd_rehashing)
 		return;
 
@@ -9728,7 +10012,7 @@ static void conf_download_complete(const char *url, const char *file, const char
 	  use inc_key to find the correct include block. This
 	  should be cheaper than using the full URL.
 	 */
-	for (inc = conf_include; inc; inc = (ConfigItem_include *)inc->next)
+	for (inc = conf_include; inc; inc = inc->next)
 	{
 		if ( inc_key != (void *)inc )
 			continue;
@@ -9778,7 +10062,7 @@ static void conf_download_complete(const char *url, const char *file, const char
 #endif
 		}
 	}
-	for (inc = conf_include; inc; inc = (ConfigItem_include *)inc->next)
+	for (inc = conf_include; inc; inc = inc->next)
 	{
 		if (inc->flag.type & INCLUDE_DLQUEUED)
 			return;
@@ -9804,7 +10088,7 @@ int     rehash(aClient *cptr, aClient *sptr, int sig)
 	loop.rehash_save_cptr = cptr;
 	loop.rehash_save_sptr = sptr;
 	loop.rehash_save_sig = sig;
-	for (inc = conf_include; inc; inc = (ConfigItem_include *)inc->next)
+	for (inc = conf_include; inc; inc = inc->next)
 	{
 		time_t modtime;
 		if (!(inc->flag.type & INCLUDE_REMOTE))
@@ -9910,11 +10194,11 @@ void delete_classblock(ConfigItem_class *class_ptr)
 void	listen_cleanup()
 {
 	int	i = 0;
-	ConfigItem_listen *listen_ptr;
-	ListStruct *next;
-	for (listen_ptr = conf_listen; listen_ptr; listen_ptr = (ConfigItem_listen *)next)
+	ConfigItem_listen *listen_ptr, *next;
+
+	for (listen_ptr = conf_listen; listen_ptr; listen_ptr = next)
 	{
-		next = (ListStruct *)listen_ptr->next;
+		next = listen_ptr->next;
 		if (listen_ptr->flag.temporary && !listen_ptr->clients)
 		{
 			safefree(listen_ptr->ip);
@@ -9924,6 +10208,7 @@ void	listen_cleanup()
 			i++;
 		}
 	}
+
 	if (i)
 		close_listeners();
 }
@@ -9932,7 +10217,8 @@ void	listen_cleanup()
 char *find_remote_include(char *url, char **errorbuf)
 {
 	ConfigItem_include *inc;
-	for (inc = conf_include; inc; inc = (ConfigItem_include *)inc->next)
+
+	for (inc = conf_include; inc; inc = inc->next)
 	{
 		if (!(inc->flag.type & INCLUDE_NOTLOADED))
 			continue;
@@ -9950,7 +10236,8 @@ char *find_remote_include(char *url, char **errorbuf)
 char *find_loaded_remote_include(char *url)
 {
 	ConfigItem_include *inc;
-	for (inc = conf_include; inc; inc = (ConfigItem_include *)inc->next)
+
+	for (inc = conf_include; inc; inc = inc->next)
 	{
 		if ((inc->flag.type & INCLUDE_NOTLOADED))
 			continue;
@@ -9959,6 +10246,7 @@ char *find_loaded_remote_include(char *url)
 		if (!stricmp(url, inc->url))
 			return inc->file;
 	}
+
 	return NULL;
 }
 
@@ -10128,7 +10416,7 @@ void unload_notloaded_includes(void)
 
 	for (inc = conf_include; inc; inc = next)
 	{
-		next = (ConfigItem_include *)inc->next;
+		next = inc->next;
 		if ((inc->flag.type & INCLUDE_NOTLOADED) || !(inc->flag.type & INCLUDE_USED))
 		{
 #ifdef USE_LIBCURL
@@ -10162,7 +10450,7 @@ void unload_loaded_includes(void)
 
 	for (inc = conf_include; inc; inc = next)
 	{
-		next = (ConfigItem_include *)inc->next;
+		next = inc->next;
 		if (!(inc->flag.type & INCLUDE_NOTLOADED) || !(inc->flag.type & INCLUDE_USED))
 		{
 #ifdef USE_LIBCURL
@@ -10198,7 +10486,7 @@ void load_includes(void)
 	/* Doing this for all the includes should actually be faster
 	 * than only doing it for includes that are not-loaded
 	 */
-	for (inc = conf_include; inc; inc = (ConfigItem_include *)inc->next)
+	for (inc = conf_include; inc; inc = inc->next)
 		inc->flag.type &= ~INCLUDE_NOTLOADED;
 }
 
@@ -10216,20 +10504,24 @@ int ssl_used_in_config_but_unavail(void)
 		return 0; /* everything is functional */
 
 	for (listener = conf_listen; listener; listener = listener->next)
+	{
 		if (listener->options & LISTENER_SSL)
 		{
 			config_error("Listen block %s:%d is configured to use SSL, however SSL is unavailable due to an earlier error (certificate/key not loaded?)", listener->ip, listener->port);
 			errors++;
 		}
+	}
 
-	for (link = conf_link; link; link = (ConfigItem_link *)link->next)
+	for (link = conf_link; link; link = link->next)
+	{
 		if (link->options & CONNECT_SSL)
 		{
 			config_error("Link block %s is configured to use SSL, however SSL is unavailable due to an earlier error (certificate/key not loaded?)", link->servername);
 			errors++;
 		}
+	}
 
-	return (errors ? 1 : 0);
+	return errors ? 1 : 0;
 }
 
 int ssl_tests(void)

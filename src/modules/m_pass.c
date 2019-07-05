@@ -69,24 +69,17 @@ MOD_UNLOAD(m_pass)
 /** Handles zlines/gzlines/throttling/unknown connections */
 DLLFUNC int _check_banned(aClient *cptr)
 {
-int i, j;
-aTKline *tk;
-aClient *acptr, *acptr2;
-ConfigItem_ban *bconf;
-
-	j = 1;
+	aTKline *tk;
+	aClient *acptr;
+	ConfigItem_ban *bconf;
 
 	if ((bconf = Find_ban(cptr, NULL, CONF_BAN_IP)))
 	{
-		ircsnprintf(zlinebuf, BUFSIZE,
-			"You are not welcome on this server: %s. Email %s for more information.",
-			bconf->reason ? bconf->reason : "no reason", KLINE_ADDRESS);
-		return exit_client(cptr, cptr, &me, zlinebuf);
+		return banned_client(cptr, "K-Lined", bconf->reason ? bconf->reason : "", 0, 0);
 	}
-	else if (find_tkline_match_zap_ex(cptr, &tk) != -1)
+	else if ((tk = find_tkline_match_zap(cptr)))
 	{
-		ircsnprintf(zlinebuf, BUFSIZE, "Z:Lined (%s)", tk->reason);
-		return exit_client(cptr, cptr, &me, zlinebuf);
+		return banned_client(cptr, "Z-Lined", tk->reason, (tk->type & TKL_GLOBAL)?1:0, 0);
 	}
 	else
 	{
@@ -114,7 +107,7 @@ ConfigItem_ban *bconf;
 CMD_FUNC(m_pass)
 {
 	char *password = parc > 1 ? parv[1] : NULL;
-	int  PassLen = 0;
+
 	if (BadPtr(password))
 	{
 		sendto_one(cptr, err_str(ERR_NEEDMOREPARAMS),
@@ -128,13 +121,8 @@ CMD_FUNC(m_pass)
 		return 0;
 	}
 
-	PassLen = strlen(password);
-	if (cptr->local->passwd)
-		MyFree(cptr->local->passwd);
-	if (PassLen > (PASSWDLEN))
-		PassLen = PASSWDLEN;
-	cptr->local->passwd = MyMalloc(PassLen + 1);
-	strlcpy(cptr->local->passwd, password, PassLen + 1);
+	/* Store the password */
+	safestrldup(cptr->local->passwd, password, PASSWDLEN+1);
 
 	/* note: the original non-truncated password is supplied as 2nd parameter. */
 	RunHookReturnInt2(HOOKTYPE_LOCAL_PASS, sptr, password, !=0);

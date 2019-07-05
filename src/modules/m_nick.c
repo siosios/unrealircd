@@ -328,7 +328,7 @@ CMD_FUNC(m_uid)
 	 */
 	if (IsServer(cptr) &&
 	    (parc > 7
-	    && (!(serv = (aClient *)find_server(sptr->name, NULL))
+	    && (!(serv = find_server(sptr->name, NULL))
 	    || serv->from != cptr->from)))
 	{
 		sendto_realops("Cannot find SID for %s (%s)", sptr->name,
@@ -352,13 +352,10 @@ CMD_FUNC(m_uid)
 	{
 		if (IsServer(sptr) && !ishold) /* server introducing new client */
 		{
-			acptrs =
-			    (aClient *)find_server(sptr->user ==
-			    NULL ? (char *)parv[6] : (char *)sptr->user->
-			    server, NULL);
-			/* (NEW: no unregistered q:line msgs anymore during linking) */
+			acptrs = find_server(sptr->user == NULL ? parv[6] : sptr->user->server, NULL);
+			/* (NEW: no unregistered Q-Line msgs anymore during linking) */
 			if (!acptrs || (acptrs->serv && acptrs->serv->flags.synced))
-				sendto_snomask(SNO_QLINE, "Q:lined nick %s from %s on %s", nick,
+				sendto_snomask(SNO_QLINE, "Q-Lined nick %s from %s on %s", nick,
 				    (*sptr->name != 0
 				    && !IsServer(sptr) ? sptr->name : "<unregistered>"),
 				    acptrs ? acptrs->name : "unknown server");
@@ -366,7 +363,7 @@ CMD_FUNC(m_uid)
 		
 		if (IsServer(cptr) && IsPerson(sptr) && !ishold) /* remote user changing nick */
 		{
-			sendto_snomask(SNO_QLINE, "Q:lined nick %s from %s on %s", nick,
+			sendto_snomask(SNO_QLINE, "Q-Lined nick %s from %s on %s", nick,
 				sptr->name, sptr->srvptr ? sptr->srvptr->name : "<unknown>");
 		}
 	}
@@ -648,7 +645,7 @@ CMD_FUNC(m_nick)
 	 */
 	if (IsServer(cptr) &&
 	    (parc > 7
-	    && (!(serv = (aClient *)find_server(parv[6], NULL))
+	    && (!(serv = find_server(parv[6], NULL))
 	    || serv->from != cptr->from)))
 	{
 		sendto_realops("Cannot find server %s (%s)", parv[6],
@@ -697,13 +694,10 @@ CMD_FUNC(m_nick)
 	{
 		if (IsServer(sptr) && !ishold) /* server introducing new client */
 		{
-			acptrs =
-			    (aClient *)find_server(sptr->user ==
-			    NULL ? (char *)parv[6] : (char *)sptr->user->
-			    server, NULL);
-			/* (NEW: no unregistered q:line msgs anymore during linking) */
+			acptrs = find_server(sptr->user == NULL ? parv[6] : sptr->user->server, NULL);
+			/* (NEW: no unregistered Q-Line msgs anymore during linking) */
 			if (!acptrs || (acptrs->serv && acptrs->serv->flags.synced))
-				sendto_snomask(SNO_QLINE, "Q:lined nick %s from %s on %s", nick,
+				sendto_snomask(SNO_QLINE, "Q-Lined nick %s from %s on %s", nick,
 				    (*sptr->name != 0
 				    && !IsServer(sptr) ? sptr->name : "<unregistered>"),
 				    acptrs ? acptrs->name : "unknown server");
@@ -711,7 +705,7 @@ CMD_FUNC(m_nick)
 		
 		if (IsServer(cptr) && IsPerson(sptr) && !ishold) /* remote user changing nick */
 		{
-			sendto_snomask(SNO_QLINE, "Q:lined nick %s from %s on %s", nick,
+			sendto_snomask(SNO_QLINE, "Q-Lined nick %s from %s on %s", nick,
 				sptr->name, sptr->srvptr ? sptr->srvptr->name : "<unknown>");
 		}
 
@@ -1333,31 +1327,23 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 		else
 			u1 = NULL;
 
-		/*
-		 * following block for the benefit of time-dependent K:-lines
-		 */
+		/* Check ban user { } blocks (K-lines in conf) */
 		if ((bconf = Find_ban(sptr, NULL, CONF_BAN_USER)))
 		{
 			ircstp->is_ref++;
-			sendto_one(cptr,
-			    ":%s %d %s :*** You are not welcome on this server (%s)"
-			    " Email %s for more information.",
-			    me.name, ERR_YOUREBANNEDCREEP,
-			    cptr->name, bconf->reason ? bconf->reason : "",
-			    KLINE_ADDRESS);
-			return exit_client(cptr, cptr, cptr, "You are banned");
+			return banned_client(sptr, "K-Lined", bconf->reason?bconf->reason:"", 0, 0);
 		}
+		/* Check ban realname { } blocks */
 		if ((bconf = Find_ban(NULL, sptr->info, CONF_BAN_REALNAME)))
 		{
 			ircstp->is_ref++;
-			sendto_one(cptr,
-			    ":%s %d %s :*** Your GECOS (real name) is not allowed on this server (%s)"
-			    " Please change it and reconnect",
-			    me.name, ERR_YOUREBANNEDCREEP,
-			    cptr->name, bconf->reason ? bconf->reason : "");
-
-			return exit_client(cptr, sptr, &me,
-			    "Your GECOS (real name) is banned from this server");
+			return banned_client(sptr, "realname", bconf->reason?bconf->reason:"", 0, 0);
+		}
+		/* Check require sasl { } blocks */
+		if (!IsLoggedIn(sptr) && (bconf = Find_ban(sptr, NULL, CONF_BAN_UNAUTHENTICATED)))
+		{
+			ircstp->is_ref++;
+			return banned_client(sptr, "Require-SASL", bconf->reason?bconf->reason:"", 0, 0);
 		}
 		tkl_check_expire(NULL);
 		/* Check G/Z lines before shuns -- kill before quite -- codemastr */
@@ -1478,7 +1464,7 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 	{
 		aClient *acptr;
 
-		if (!(acptr = (aClient *)find_server_quick(user->server)))
+		if (!(acptr = find_server_quick(user->server)))
 		{
 			sendto_ops
 			    ("Bad USER [%s] :%s USER %s %s : No such server",
@@ -1515,22 +1501,7 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 
 	if (virthost && umode)
 	{
-		tkllayer[0] = nick;
-		tkllayer[1] = nick;
-		tkllayer[2] = umode;
-		dontspread = 1;
-		do_cmd(cptr, sptr, "MODE", 3, tkllayer);
-		dontspread = 0;
-		if (virthost && *virthost != '*')
-		{
-			if (sptr->user->virthost)
-			{
-				MyFree(sptr->user->virthost);
-				sptr->user->virthost = NULL;
-			}
-			/* Here pig.. yeah you .. -Stskeeps */
-			sptr->user->virthost = strdup(virthost);
-		}
+		/* Set the IP address first */
 		if (ip && (*ip != '*'))
 		{
 			char *ipstring = decode_ip(ip);
@@ -1543,6 +1514,25 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 			}
 			sptr->ip = strdup(ipstring);
 		}
+
+		/* For remote clients we recalculate the cloakedhost here because
+		 * it may depend on the IP address (bug #5064).
+		 */
+		make_virthost(sptr, user->realhost, user->cloakedhost, 0);
+		safestrdup(user->virthost, user->cloakedhost);
+
+		/* Set the umodes */
+		tkllayer[0] = nick;
+		tkllayer[1] = nick;
+		tkllayer[2] = umode;
+		tkllayer[3] = NULL;
+		dontspread = 1;
+		do_cmd(cptr, sptr, "MODE", 3, tkllayer);
+		dontspread = 0;
+
+		/* Set the vhost */
+		if (virthost && *virthost != '*')
+			safestrdup(sptr->user->virthost, virthost);
 	}
 
 	hash_check_watch(sptr, RPL_LOGON);	/* Uglier hack */
@@ -1585,7 +1575,7 @@ int _register_user(aClient *cptr, aClient *sptr, char *nick, char *username, cha
 			sendto_one(sptr, rpl_str(RPL_SNOMASK),
 				me.name, sptr->name, get_snostr(user->snomask));
 
-		if (!IsSecure(sptr) && (iConf.plaintext_policy_user == PLAINTEXT_POLICY_WARN))
+		if (!IsSecure(sptr) && !IsLocal(sptr) && (iConf.plaintext_policy_user == PLAINTEXT_POLICY_WARN))
 			sendnotice(sptr, "%s", iConf.plaintext_policy_user_message);
 		
 		/* Make creation time the real 'online since' time, excluding registration time.
@@ -1701,12 +1691,12 @@ int	AllowClient(aClient *cptr, struct hostent *hp, char *sockhost, char *usernam
 	static char uhost[HOSTLEN + USERLEN + 3];
 	static char fullname[HOSTLEN + 1];
 
-	if (!IsSecure(cptr) && (iConf.plaintext_policy_user == PLAINTEXT_POLICY_DENY))
+	if (!IsSecure(cptr) && !IsLocal(cptr) && (iConf.plaintext_policy_user == PLAINTEXT_POLICY_DENY))
 	{
 		return exit_client(cptr, cptr, &me, iConf.plaintext_policy_user_message);
 	}
 
-	for (aconf = conf_allow; aconf; aconf = (ConfigItem_allow *) aconf->next)
+	for (aconf = conf_allow; aconf; aconf = aconf->next)
 	{
 		if (!aconf->hostname || !aconf->ip)
 			goto attach;
